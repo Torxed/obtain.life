@@ -1,0 +1,8 @@
+[submodule "spiderWeb"]
+	path = spiderWeb
+	url = git@github.com:Torxed/spiderWeb.git
+	branch = master
+[submodule "slimHTTP"]
+	path = slimHTTP
+	url = git@github.com:Torxed/slimHTTP.git
+	branch = master
