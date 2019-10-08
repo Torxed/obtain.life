@@ -6,3 +6,7 @@
 	path = slimHTTP
 	url = git@github.com:Torxed/slimHTTP.git
 	branch = master
+[submodule "slimSocket"]
+	path = slimSocket
+	url = git@github.com:Torxed/slimSocket.git
+	branch = master

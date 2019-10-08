@@ -1,6 +1,4 @@
-import logging, signal, shutil
-from slimHTTP import slimhttpd
-from spiderWeb import spiderWeb
+import logging, signal, shutil, json
 from hashlib import sha512
 from collections import OrderedDict as OD
 from time import time
@@ -110,6 +108,10 @@ __builtins__.__dict__['config'] = safedict({
 	}
 })
 
+from slimHTTP import slimhttpd
+from spiderWeb import spiderWeb
+from slimSocket import slimSocket
+
 if isfile('datstore.json'):
 	with open('datstore.json', 'r') as fh:
 		log('Loading sample datastore from {{datstore.json}}', origin='STARTUP', level=5)
@@ -127,16 +129,14 @@ if not 'guardians' in datastore: datastore['guardians'] = {
 		'secret' : '02f9cdb4f740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72895bc8',
 		'users' : {
 			'anton' : {'password' : 'domain'}
+		},
+		'auth_sessions' : {
+
 		}
 	}
 }
 if not 'users' in datastore: datastore['users'] = {
 	'anton' : {'password' : 'test'}
-}
-if not 'auth_sessions' in datastore: datastore['auth_sessions'] = {
-	'22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2' : {
-		# ...
-	}
 }
 if not 'tokens' in datastore: datastore['tokens'] = {}
 
@@ -189,16 +189,26 @@ class parser():
 					else:
 						log(f"Failed login attempt for user '{data['username'][:200]}' beloging to guardian '{guardian['name'][:200]}'", level=3, origin="AUTH", function="simple")
 
+			elif data['_module'] == 'session':
+				if not '_app' in data: return None
+				if not '_secret' in data: return None
+				if not data['_app'] in datastore['guardians']: return None
+				if not data['_secret'] == datastore['guardians'][data['_app']]['secret']: return None
+
+				guardian = datastore['guardians'][data['_app']]
+				guardian['auth_sessions'][data['session']] = True
+				log(f"Guardian {guardian['name']} has initialized a auth token: {data['session'][:200]}", origin="SESSION", function="register", level=4)
+
 			elif data['_module'] == 'register':
-				if not '_guardian' in data: return None
+				if not '_app' in data: return None
 				if not '_user' in data: return None
 				if not '_secret' in data: return None
-				if not data['_guardian'] in datastore['guardians']: return None
-				if not data['_secret'] == datastore['guardians'][data['_guardian']]['_secret']: return None
+				if not data['_app'] in datastore['guardians']: return None
+				if not data['_secret'] == datastore['guardians'][data['_app']]['secret']: return None
 
-				guardian = datastore['guardians'][data['_guardian']]
+				guardian = datastore['guardians'][data['_app']]
 
-				if data['_user']['id'] in datastore['users'][data['_guardian']]:
+				if data['_user']['id'] in datastore['users'][data['_app']]:
 					if 'protect' in data and data['protect']:
 						log(f"Guardian {guardian['name']} was about to overwrite (but blocked): {data['_user']['id'][:200]}")
 						yield {'_module' : 'register', 'status' : 'failed', 'reason' : 'User already exists, and you\'ve chosen protected mode on this user ID.'}
@@ -207,7 +217,7 @@ class parser():
 				else:
 					log(f"Guardian {guardian['name']} is regestrating a user: {data['_user']['id'][:200]}")
 
-				datastore['users'][data['_guardian']][data['_user']['id']] = data['_user']
+				datastore['users'][data['_app']][data['_user']['id']] = data['_user']
 				yield {'_module' : 'register', 'status' : 'successful'}
 
 			elif data['_module'] == 'ping':
@@ -222,14 +232,13 @@ class parser():
 		else:
 			log(f'Invalid data structure detected from {addr}: {str(data)[:200]}', level=3, origin='TRAP')
 
-#websocket = spiderWeb.server({'default' : parser()}, address='127.0.0.1', port=1337)
-
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)
 https = slimhttpd.https_serve(upgrades={b'websocket': websocket}, port=1338, cert='cert.pem', key='key.pem')
+socket = slimSocket.socket_serve(port=1339, parsers=websocket.parsers)
 
 while 1:
-	for handler in [http, https]:
+	for handler in [http, https, socket]:
 		client = handler.accept()
 
 		#for fileno, client in handler.sockets.items():
