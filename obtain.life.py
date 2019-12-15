@@ -6,6 +6,9 @@ from os import walk, urandom
 from os.path import isfile
 from systemd.journal import JournalHandler
 
+import hmac
+import hashlib
+
 def sig_handler(signal, frame):
 	http.close()
 	https.close()
@@ -122,22 +125,27 @@ else:
 	log(f'Starting with a clean database (reason: couldn\'t find {{datastore.json}})', origin='STARTUP', level=5)
 	datastore = safedict()
 
-if not 'guardians' in datastore: datastore['guardians'] = {
-	'22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2' : {
-		'name' : 'hvornum.se',
-		'contact' : 'anton@hvornum.se',
-		'secret' : '02f9cdb4f740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72895bc8',
-		'users' : {
-			'anton' : {'password' : 'domain'}
-		},
-		'auth_sessions' : {
+if not 'id' in datastore:
+	datastore['id'] = {
+		'22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2' : {
+			'name' : 'scientist.cloud',
+			'contact' : 'evil@scientist.cloud',
+			'alg' : 'HS256',
+			'secret' : '02f9cdb4f740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72895bc8',
+			'users' : {
+				'anton' : {'password' : 'test'}
+			},
+			'auth_sessions' : {
 
+			}
 		}
 	}
-}
-if not 'users' in datastore: datastore['users'] = {
-	'anton' : {'password' : 'test'}
-}
+
+if not 'domains' in datastore:
+	datastore['domains'] = {
+		'scientist.cloud' : '22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2'
+	}
+
 if not 'tokens' in datastore: datastore['tokens'] = {}
 
 def gen_id(length=256):
@@ -151,86 +159,74 @@ def save_datastore():
 		log('Saving datastore to {{datstore.json}}', origin='save_datastore', level=5)
 		json.dump(datastore, fh)
 
+def HMAC_256(data, key):
+	signature = hmac.new(bytes(key , 'utf-8'), msg=bytes(data , 'utf-8'), digestmod = hashlib.sha256).hexdigest().upper()
+	return signature
+
+def signature_check(domain_id, data, key):
+	if not data['alg'] == datastore['id'][domain_id]['alg']: return None
+	if not data['sign']: return None
+
+	if data['alg'] == 'HS256':
+		client_signature = data['sign']
+
+		del(data['sign'])
+		print(f'Signing [{key}]:', [json.dumps(data, separators=(',', ':'))])
+		server_signature = HMAC_256(json.dumps(data, separators=(',', ':')), key)
+		data['sign'] = client_signature
+
+		if not server_signature or server_signature.lower() != client_signature.lower():
+			return server_signature
+
+		return True
+
+	return None
+
+
 class parser():
 	def parse(self, client, data, headers, fileno, addr, *args, **kwargs):
-		if '_module' in data:
-			print(safedict(data).dump())
-			if data['_module'] == 'auth':
-				## !!!!
-				## TODO: Error logging on all the return None, they should never happen !!
-				if not 'username' in data and 'password' not in data: return None
-				if type(data['username']) != str or type(data['password']) != str: return None
-				if not '_app' in data:
-					## == A simple login/shared domains
-					## TODO: Think this one through, because once a access token is given.
-					##       That token can be used by Company.A to access Company.B services.
-					##       Could be solved by a callback
-#					if not data['username'] in datastore['users']: return None
-#
-#					if datastore['users'][data['username']]['password'] == data['password']:
-#						log(f"User {data['username'][:200]} logged in.", level=5, origin="AUTH", function="simple")
-#						token = gen_id()
-#						datastore['tokens'][token] = {'user' : data['username'], 'time' : time()}
-#						yield {'_module' : 'auth', 'status' : 'success', 'token' : token}
-#					else:
-#						log(f"Failed login attempt for user '{data['username'][:200]}'", level=3, origin="AUTH", function="simple")
-					return None
-				else:
-					## == A non-simple login with domain-soecific users
-					if not data['_app'] in datastore['guardians']: return None
-					if not data['username'] in datastore['guardians'][data['_app']]['users']: return None
+		print(data)
 
-					guardian = datastore['guardians'][data['_app']]
-					if guardian['users'][data['username']]['password'] == data['password']:
-						log(f"User '{data['username'][:200]}' beloging to guardian '{guardian['name'][:200]}' logged in.", level=5, origin="AUTH", function="simple")
-						token = gen_id()
-						datastore['tokens'][token] = {'user' : data['username'], 'time' : time()}
-						yield {'_module' : 'auth', 'status' : 'success', 'token' : token}
-					else:
-						log(f"Failed login attempt for user '{data['username'][:200]}' beloging to guardian '{guardian['name'][:200]}'", level=3, origin="AUTH", function="simple")
+		if not 'alg' in data: return None
+		if not 'sign' in data or not data['sign']: return None
+		if not 'domain' in data: data['domain'] = 'obtain.life'
 
-			elif data['_module'] == 'session':
-				if not '_app' in data: return None
-				if not '_secret' in data: return None
-				if not data['_app'] in datastore['guardians']: return None
-				if not data['_secret'] == datastore['guardians'][data['_app']]['secret']: return None
+		domain_id = datastore['domains'][data['domain']]
+		key = datastore['id'][domain_id]['secret']
+		server_signature = signature_check(domain_id, data, key)
+		if server_signature is not True:
+			log(f'Invalid signature from user {client}, expected signature: {server_signature} but got {data["sign"]}.', level=3, origin='parser.parse')
+			return None
 
-				guardian = datastore['guardians'][data['_app']]
-				guardian['auth_sessions'][data['session']] = True
-				log(f"Guardian {guardian['name']} has initialized a auth token: {data['session'][:200]}", origin="SESSION", function="register", level=4)
+		for result in signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
+			yield result
+			
+def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
+	## If we've gotten here, it means the signature of the packet is varified.
+	## There for, we can treat the client-data as trusted for it's own domain.
+	domain_id = datastore['domains'][data['domain']]
 
-			elif data['_module'] == 'register':
-				if not '_app' in data: return None
-				if not '_user' in data: return None
-				if not '_secret' in data: return None
-				if not data['_app'] in datastore['guardians']: return None
-				if not data['_secret'] == datastore['guardians'][data['_app']]['secret']: return None
+	if '_module' in data and data['_module'] == 'auth':
+		if not 'username' in data: return None
+		if not 'password' in data: return None
 
-				guardian = datastore['guardians'][data['_app']]
+		if not data['username'] in datastore['id'][domain_id]['users']:
+			log(f'User probing attempt from {client}', level=2, origin='signed_parse')
+			return None
 
-				if data['_user']['id'] in datastore['users'][data['_app']]:
-					if 'protect' in data and data['protect']:
-						log(f"Guardian {guardian['name']} was about to overwrite (but blocked): {data['_user']['id'][:200]}")
-						yield {'_module' : 'register', 'status' : 'failed', 'reason' : 'User already exists, and you\'ve chosen protected mode on this user ID.'}
-					else:
-						log(f"Guardian {guardian['name']} is overwriting {data['_user']['id'][:200]}")
-				else:
-					log(f"Guardian {guardian['name']} is regestrating a user: {data['_user']['id'][:200]}")
+		username = data['username']
+		if data['password'] != datastore['id'][domain_id]['users'][username]['password']:
+			log(f'Password spraying from {client} on account {username}@{data["domain"]}', level=2, origin='signed_parse')
+			return None
 
-				datastore['users'][data['_app']][data['_user']['id']] = data['_user']
-				yield {'_module' : 'register', 'status' : 'successful'}
+		print('Logged in!')
+		token = gen_id()
+		datastore['tokens'][token] = {'user' : data['username'], 'time' : time(), 'domain' : domain_id}
 
-			elif data['_module'] == 'ping':
-				if 'token' in data and data['token'] in datastore['tokens']:
-					log(f'Token has been refreshed for user: {tokens[data["token"]]["user"]}', level=4, origin='PING')
-					datastore['tokens'][data['token']]['time'] = time
+		response = {'_module' : 'auth', 'status' : 'success', 'token' : token, 'sign' : None, 'alg' : data['alg']}
+		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
 
-				yield {'_module' : 'ping', 'status' : 'success', 'time' : time()}
-
-			else:
-				log(f'Module traversing detected from {addr}: {data["_module"][:200]}', level=3, origin='TRAP')
-		else:
-			log(f'Invalid data structure detected from {addr}: {str(data)[:200]}', level=3, origin='TRAP')
+		yield response
 
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)
