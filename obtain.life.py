@@ -147,6 +147,7 @@ if not 'domains' in datastore:
 	}
 
 if not 'tokens' in datastore: datastore['tokens'] = {}
+if not 'blocks' in datastore: datastore['blocks'] = {}
 
 def gen_id(length=256):
 	return sha512(urandom(length)).hexdigest()
@@ -182,11 +183,20 @@ def signature_check(domain_id, data, key):
 
 	return None
 
+def allowed_user(client):
+	if client.addr in datastore['blocks']: return False
+	return True
+
+def block(client):
+	datastore['blocks'][client.addr] = time()
 
 class parser():
 	def parse(self, client, data, headers, fileno, addr, *args, **kwargs):
-		print(data)
+		if not allowed_user(client):
+			log(f'Client {client} is blocked, ignoring request.', level=4, origin='parser.parse')
+			return None
 
+		print(data)
 		if not 'alg' in data: return None
 		if not 'sign' in data or not data['sign']: return None
 		if not 'domain' in data: data['domain'] = 'obtain.life'
@@ -196,6 +206,7 @@ class parser():
 		server_signature = signature_check(domain_id, data, key)
 		if server_signature is not True:
 			log(f'Invalid signature from user {client}, expected signature: {server_signature} but got {data["sign"]}.', level=3, origin='parser.parse')
+			block(client)
 			return None
 
 		for result in signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
@@ -212,11 +223,13 @@ def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 
 		if not data['username'] in datastore['id'][domain_id]['users']:
 			log(f'User probing attempt from {client}', level=2, origin='signed_parse')
+			block(client)
 			return None
 
 		username = data['username']
 		if data['password'] != datastore['id'][domain_id]['users'][username]['password']:
 			log(f'Password spraying from {client} on account {username}@{data["domain"]}', level=2, origin='signed_parse')
+			block(client)
 			return None
 
 		print('Logged in!')
