@@ -25,7 +25,7 @@ First, your or your orgnization needs to create a master account for your domain
 This is so that someone can setup the auth-flow (callbacks etc).
 
 This is done by going to https://obtain.life and "claim" your domain.<br>
-The claim works by checking against a DNS record *(TXT _obtain.life.[claimed domain])* or via HTTPS file lookup on https://[claimed.domain]/obtain.life. Once the claim is verified, the claim-ee will recieve a e-mail with a reset-password link to complete the master account for the domain. If multiple domains are claimed, only one password-email will go out and the same account can be used to manage multiple domains.
+The claim works by checking against a DNS record *(TXT _obtain.life.[claimed domain])* or via HTTPS file lookup on [https://[claimed.domain]/obtain.life](https://[claimed.domain]/obtain.life). Once the claim is verified, the claim-ee will recieve a e-mail with a reset-password link to complete the master account for the domain. If multiple domains are claimed, only one password-email will go out and the same account can be used to manage multiple domains.
 
 Once the domain is claimed, simply connect via sockets, websockets or HTTPS and login against your domain.<br>
 `obtrain.life` will contact any backend's registered via the `register` API and let your environment know when tokens are distributed upon successful logins.
