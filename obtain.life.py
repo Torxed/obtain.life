@@ -44,6 +44,11 @@ def _log(*msg, origin='UNKNOWN', level=5, **kwargs):
 		else:
 			log_adapter.debug(' '.join(msg))
 
+def uid(seed=None, bits=32):
+	if not seed:
+		seed = os.urandom(bits) + bytes(str(time()), 'UTF-8')
+	return hashlib.sha512(seed)
+
 class _safedict(dict):
 	def __init__(self, *args, **kwargs):
 		args = list(args)
@@ -125,33 +130,47 @@ else:
 	log(f'Starting with a clean database (reason: couldn\'t find {{datastore.json}})', origin='STARTUP', level=5)
 	datastore = safedict()
 
+
+if not 'domains' in datastore: datastore['domains'] = {}
 if not 'id' in datastore:
-	datastore['id'] = {
-		'22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2' : {
-			'name' : 'scientist.cloud',
-			'contact' : 'evil@scientist.cloud',
-			'alg' : 'HS256',
-			'secret' : '02f9cdb4f740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72895bc8',
-			'service_secret' : 'ac3fee145740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72899a9b',
-			'users' : {
-				'anton' : {'username' : 'anton',
-							'password' : 'test',
-							'friendly_name' : 'Anton Hvornum',
-							'display_picture' : 'https://avatars1.githubusercontent.com/u/861439?s=460&v=4'}
-			},
-			'auth_sessions' : {
+	datastore['id'] = {}
+	
+	for domain in ('obtain.life', 'scientist.cloud'):
+		secret_file = None
+		if os.path.isdir('./secrets') and isfile(f'./secrets/{domain0}.json'):
+			secret_file = f'./secrets/{domain}.json'
+		elif os.path.isdir('/etc/obtain.life/secrets') and isfile(f'./etc/obtain.life/secrets/{domain}-json'):
+			secret_file = f'./etc/obtain.life/secrets/{domain}-json'
 
-			},
-			'subscribers' : {
+		domain_id = uid()
+		datastore['domains'][domain] = domain_id
+		if secret_file:
+			log(f'Loading secrets for {domain} in {secret_file}')
+			with open(secret_file, 'r') as fh:
+				try:
+					datastore['id'][domain_id] = json.load(fh)
+				except:
+					log(f'Invalid JSON format in {secret_file}', level=2, origin='startup')
+		else:
+			datastore['id'][domain_id] = {
+				"name" : domain,
+				"contact" : "evil@scientist.cloud",
+				"alg" : "HS256",
+				"secret" : uid(),
+				"service_secret" : uid(),
+				"users" : {
+					"anton" : {"username" : "anton",
+								"password" : "test",
+								"friendly_name" : "Anton Hvornum",
+								"display_picture" : "https://avatars1.githubusercontent.com/u/861439?s=460&v=4"}
+				},
+				"auth_sessions" : {
 
+				},
+				"subscribers" : {
+
+				}
 			}
-		}
-	}
-
-if not 'domains' in datastore:
-	datastore['domains'] = {
-		'scientist.cloud' : '22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2'
-	}
 
 if not 'tokens' in datastore: datastore['tokens'] = {}
 if not 'blocks' in datastore: datastore['blocks'] = {}
