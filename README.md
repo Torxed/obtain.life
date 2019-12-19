@@ -2,6 +2,8 @@
 A central authentication system *(Identity Manager)* for HTTP, WebSockets and socket requests.<br>
 Basic principle is simple, resembles JWT's logic, is stripped down and easy to use.
 
+![certs](https://img.shields.io/badge/dummy%20certs-not%20prodction-blue.svg)
+
 # Integration libraries
 
  * [python-olife](https://github.com/Torxed/python-olife)
