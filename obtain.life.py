@@ -196,7 +196,7 @@ class parser():
 			log(f'Client {client} is blocked, ignoring request.', level=4, origin='parser.parse')
 			return None
 
-		print(data)
+		print('***', data)
 		if not 'alg' in data: return None
 		if not 'sign' in data or not data['sign']: return None
 		if not 'domain' in data: data['domain'] = 'obtain.life'
