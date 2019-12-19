@@ -132,10 +132,17 @@ if not 'id' in datastore:
 			'contact' : 'evil@scientist.cloud',
 			'alg' : 'HS256',
 			'secret' : '02f9cdb4f740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72895bc8',
+			'service_secret' : 'ac3fee145740b2b043d09fc91136058390b4f6ab4cf4701c93f6819e72899a9b',
 			'users' : {
-				'anton' : {'password' : 'test'}
+				'anton' : {'username' : 'anton',
+							'password' : 'test',
+							'friendly_name' : 'Anton Hvornum',
+							'display_picture' : 'https://avatars1.githubusercontent.com/u/861439?s=460&v=4'}
 			},
 			'auth_sessions' : {
+
+			},
+			'subscribers' : {
 
 			}
 		}
@@ -161,18 +168,53 @@ def save_datastore():
 		json.dump(datastore, fh)
 
 def HMAC_256(data, key):
-	signature = hmac.new(bytes(key , 'utf-8'), msg=bytes(data , 'utf-8'), digestmod = hashlib.sha256).hexdigest().upper()
+	if type(data) == dict: data = json.dumps(data, separators=(',', ':'))
+	if type(data) != bytes: data = bytes(data, 'UTF-8')
+	if type(key) != bytes: key = bytes(key, 'UTF-8')
+	print(f'Signing with key: {key}')
+	print(json.dumps(json.loads(data.decode('UTF-8')), indent=4))
+
+	signature = hmac.new(key, msg=data, digestmod = hashlib.sha256).hexdigest().upper()
 	return signature
+
+def service_signature_check(domain_id, data, key, auto_generated_fields={}):
+	original_values = {**data}
+	if not data['alg'] == datastore['id'][domain_id]['alg']: return None
+	if not data['sign']: return None
+	if not data['service_sign']: return None
+
+	if data['alg'] == 'HS256':
+		service_sign = data['service_sign']
+		del(data['service_sign'])
+		del(data['sign'])
+		for field in auto_generated_fields:
+			del(data[field])
+
+		print(f'Signing with key: {key}')
+		print(json.dumps(data, indent=4, separators=(',', ':')))
+
+		server_signature = HMAC_256(json.dumps(data, separators=(',', ':')), key)
+		data['service_sign'] = service_sign
+
+		for key, val in original_values.items():
+			data[key] = val
+
+		if not server_signature or server_signature.lower() != service_sign.lower():
+			return server_signature
+
+		return True
+
+	return None
 
 def signature_check(domain_id, data, key):
 	if not data['alg'] == datastore['id'][domain_id]['alg']: return None
 	if not data['sign']: return None
 
+
 	if data['alg'] == 'HS256':
 		client_signature = data['sign']
 
 		del(data['sign'])
-		print(f'Signing [{key}]:', [json.dumps(data, separators=(',', ':'))])
 		server_signature = HMAC_256(json.dumps(data, separators=(',', ':')), key)
 		data['sign'] = client_signature
 
@@ -234,6 +276,15 @@ def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 
 		print('Logged in!')
 		token = gen_id()
+
+		## Notify the backends:
+		backend_notification = {'_module' : 'auth', 'status' : 'success', 'user' : datastore['id'][domain_id]['users'][username], 'domain' : data['domain'], 'token' : token, 'alg' : data['alg']}
+		backend_notification['sign'] = HMAC_256(backend_notification, datastore['id'][domain_id]['secret'])
+
+		for b_fileno in datastore['id'][domain_id]['subscribers']:
+			print(f'Sending notification to subscriber {b_fileno},', datastore['id'][domain_id]['subscribers'][b_fileno]['sock'])
+			datastore['id'][domain_id]['subscribers'][b_fileno]['sock'].send(backend_notification)
+
 		datastore['tokens'][token] = {'user' : data['username'], 'time' : time(), 'domain' : domain_id}
 
 		response = {'_module' : 'auth', 'status' : 'success', 'token' : token, 'sign' : None, 'alg' : data['alg']}
@@ -241,10 +292,43 @@ def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 
 		yield response
 
+	elif '_module' in data and data['_module'] == 'register':
+		auto_generated_fields = set()
+		if not 'service' in data: data['service'] = 'user'
+		if not 'friendly_name' in data:
+			auto_generated_fields.add('friendly_name')
+			data['friendly_name'] = ':'.join([str(x) for x in addr])
+
+		if data['service'] == 'user':
+			pass # Not allowed yet
+		elif data['service'] == 'backend':
+			if not 'service_sign' in data: return None
+
+			key = datastore['id'][domain_id]['service_secret']
+			server_signature = service_signature_check(domain_id, data, key, auto_generated_fields=auto_generated_fields)
+
+			if server_signature is not True:
+				log(f'Invalid service signature from endpoint {client}, expected signature: {server_signature} but got {data["service_sign"]}.', level=3, origin='parser.signed_parse')
+				block(client)
+				return None
+
+			print(f'Service is subscribed on fileno {fileno}, identity {client}')
+			datastore['id'][domain_id]['subscribers'][fileno] = {'sock' : client, 'addr' : addr, 'friendly_name' : data['friendly_name']}
+
+			response = {'_module' : 'register', 'status' : 'success', 'domain' : data['domain'], 'friendly_name' : data['friendly_name']}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+			yield response
+
+		elif data['service'] == 'domain':
+			pass
+			# Email user a challenge.
+			# Once the user presses the verification link, the verification process starts.
+
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)
 https = slimhttpd.https_serve(upgrades={b'websocket': websocket}, port=1338, cert='cert.pem', key='key.pem')
-socket = slimSocket.socket_serve(port=1339, parsers=websocket.parsers)
+socket = slimSocket.socket_serve(port=1339, parsers=websocket.parsers, cert='ca.crt', key='ca.key')
 
 while 1:
 	for handler in [http, https, socket]:
@@ -262,4 +346,5 @@ while 1:
 							client.send(response)
 						except BrokenPipeError:
 							pass
-						client.close()
+						if not client.keep_alive:
+							client.close()
