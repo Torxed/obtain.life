@@ -1,4 +1,4 @@
-# obtain.life
+# obtain.life *(work in progress)*
 A central authentication system *(Identity Manager)* for HTTP, WebSockets and socket requests.<br>
 Basic principle is simple, resembles JWT's logic, is stripped down and easy to use.
 
