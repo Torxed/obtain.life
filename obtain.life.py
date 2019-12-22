@@ -3,8 +3,11 @@ from hashlib import sha512
 from collections import OrderedDict as OD
 from time import time
 from os import walk, urandom
-from os.path import isfile
+from os.path import isfile, isdir
 from systemd.journal import JournalHandler
+from mailer import email
+
+## https://support.google.com/a/answer/2956491?hl=en&authuser=1
 
 import hmac
 import hashlib
@@ -46,8 +49,8 @@ def _log(*msg, origin='UNKNOWN', level=5, **kwargs):
 
 def uid(seed=None, bits=32):
 	if not seed:
-		seed = os.urandom(bits) + bytes(str(time()), 'UTF-8')
-	return hashlib.sha512(seed)
+		seed = urandom(bits) + bytes(str(time()), 'UTF-8')
+	return hashlib.sha512(seed).hexdigest().upper()
 
 class _safedict(dict):
 	def __init__(self, *args, **kwargs):
@@ -137,9 +140,9 @@ if not 'id' in datastore:
 	
 	for domain in ('obtain.life', 'scientist.cloud'):
 		secret_file = None
-		if os.path.isdir('./secrets') and isfile(f'./secrets/{domain0}.json'):
+		if isdir('./secrets') and isfile(f'./secrets/{domain}.json'):
 			secret_file = f'./secrets/{domain}.json'
-		elif os.path.isdir('/etc/obtain.life/secrets') and isfile(f'./etc/obtain.life/secrets/{domain}-json'):
+		elif isdir('/etc/obtain.life/secrets') and isfile(f'./etc/obtain.life/secrets/{domain}-json'):
 			secret_file = f'./etc/obtain.life/secrets/{domain}-json'
 
 		domain_id = uid()
@@ -229,7 +232,6 @@ def signature_check(domain_id, data, key):
 	if not data['alg'] == datastore['id'][domain_id]['alg']: return None
 	if not data['sign']: return None
 
-
 	if data['alg'] == 'HS256':
 		client_signature = data['sign']
 
@@ -270,15 +272,27 @@ class parser():
 			block(client)
 			return None
 
-		for result in signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
+		for result in self.signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 			yield result
 			
-def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
-	## If we've gotten here, it means the signature of the packet is varified.
-	## There for, we can treat the client-data as trusted for it's own domain.
-	domain_id = datastore['domains'][data['domain']]
+	def signed_parse(self, client, data, headers, fileno, addr, *args, **kwargs):
+		## If we've gotten here, it means the signature of the packet is varified.
+		## There for, we can treat the client-data as trusted for it's own domain.
 
-	if '_module' in data and data['_module'] == 'auth':
+		if '_module' in data and data['_module'] == 'auth':
+			for response in self.login(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
+		elif '_module' in data and data['_module'] == 'register':
+			for response in self.register(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
+		elif '_module' in data and data['_module'] == 'claim':
+			for response in self.claim(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
+	def login(self, client, data, headers, fileno, addr, *args, **kwargs):
+		domain_id = datastore['domains'][data['domain']]
 		if not 'username' in data: return None
 		if not 'password' in data: return None
 
@@ -311,7 +325,8 @@ def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 
 		yield response
 
-	elif '_module' in data and data['_module'] == 'register':
+	def register(self, client, data, headers, fileno, addr, *args, **kwargs):
+		domain_id = datastore['domains'][data['domain']]
 		auto_generated_fields = set()
 		if not 'service' in data: data['service'] = 'user'
 		if not 'friendly_name' in data:
@@ -331,7 +346,7 @@ def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 				block(client)
 				return None
 
-			print(f'Service is subscribed on fileno {fileno}, identity {client}')
+			log(f'Backend {client} is subscribed to events on domain {data["domain"]}', level=4, origin='register')
 			datastore['id'][domain_id]['subscribers'][fileno] = {'sock' : client, 'addr' : addr, 'friendly_name' : data['friendly_name']}
 
 			response = {'_module' : 'register', 'status' : 'success', 'domain' : data['domain'], 'friendly_name' : data['friendly_name']}
@@ -343,6 +358,46 @@ def signed_parse(client, data, headers, fileno, addr, *args, **kwargs):
 			pass
 			# Email user a challenge.
 			# Once the user presses the verification link, the verification process starts.
+
+	def subscribe(self, client, data, headers, fileno, addr, *args, **kwargs):
+		pass
+
+	def claim(self, client, data, headers, fileno, addr, *args, **kwargs):
+		if not 'admin' in data: return None
+		if not 'claim' in data: return None
+
+		domain_id = datastore['domains'][data['domain']]
+		log(f'{data["admin"]} is claiming {data["claim"]}.', level=4, origin="claim")
+
+		configuration = {
+			'DOMAIN' : data['claim'],
+			'SSH_MAIL_USER_FROM' : 'no-reply', # without @
+			'SSH_MAIL_USER_FROMDOMAIN' : 'obtain.life', # without @
+			'SSH_MAIL_USER_TO' : data['admin'].split('@',1)[0],
+			'SSH_MAIL_USER_TODOMAIN' : data['admin'].split('@',1)[1],
+			'RAW_TIME' : time(),
+			'SUBJECT' : f'Claim domain: {data["claim"]}',
+			'TRY_ONE_MAILSERVER' : False,
+			'TEXT_TEMPLATE' : None,
+			'HTML_TEMPLATE' : None,
+			'DKIM_KEY' : "/etc/sshmailer/sshmailer.pem",
+			'DNS_URL' : f'https://obtain.life/verify/?mode=DNS&domain={data["claim"]}',
+			'HTTPS_URL' : f'https://obtain.life/verify/?mode=HTTPS&domain={data["claim"]}',
+			'challenge' : 'testing'
+		}
+
+		if email(configuration):
+			response = {'_module' : 'claim', 'status' : 'success', 'domain' : data['claim']}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+			yield response
+		else:
+			response = {'_module' : 'claim', 'status' : 'failed', 'domain' : data['claim'], 'reason' : 'Could not e-mail the administrator.'}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+			yield response
+
+
 
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)
