@@ -7,7 +7,7 @@
 		<style>
 			body {
 				color: #fff;
-				font-family:Monospace;
+				font-family: sans-serif;
 				font-size:13px;
 				text-align:center;
 				font-weight: bold;
@@ -27,7 +27,7 @@
 				border: 1px solid #272727;
 				border-radius: 10px;
 
-				background-color: rgba(120, 120, 120, 0.2);
+				background-color: rgba(120, 120, 120, 0.85);
 				overflow: hidden;
 
 				display: flex;
@@ -37,8 +37,6 @@
 					background-color: #282828;
 					border-bottom: 1px solid #222222;
 					padding: 5px;
-					border-top-left-radius: 10px;
-					border-top-right-radius: 10px;
 				}
 
 				.forms {
@@ -62,17 +60,17 @@
 					flex-direction: row;
 				}
 					.button {
-						width: 90px;
+						width: 100px;
 						margin-left: auto;
 						margin-bottom: 10px;
 					}
 
-					a {
-						color: #0089CF;
-						line-height: 3em;
+					p {
+						color: #FFFFFF;
 						text-decoration: none;
+						cursor: pointer;
 					}
-					a:hover {
+					p:hover {
 						text-decoration: underline;
 					}
 		</style>
@@ -115,6 +113,52 @@
 						socket.send(payload)
 					});
 				})
+
+				document.querySelector('#claim').addEventListener('click', function() {
+					document.querySelector('#Login').innerHTML = '';
+
+					let login = document.createElement('div');
+					let header = document.createElement('div');
+					let forms = document.createElement('div');
+					let buttons = document.createElement('div');
+					let email = document.createElement('input');
+					let domain = document.createElement('input');
+					let p = document.createElement('p');
+					let submit = document.createElement('button');
+
+					header.classList = 'header';
+					forms.classList = 'forms';
+					email.classList = 'inputField'; 
+					domain.classList = 'inputField';
+					buttons.classList = 'buttons';
+					p.classList = 'claim';
+					submit.classList = 'inputField button';
+
+					header.innerHTML = 'Claim domain';
+					email.placeholder = 'Admin email to domain claim with...'
+					domain.placeholder = 'Domain to claim/register..'
+					p.innerHTML = 'Login page';
+					submit.innerHTML = 'Claim Domain';
+
+					email.value = 'anton@hvornum.se';
+					domain.value = 'hvornum.se';
+
+					forms.appendChild(email);
+					forms.appendChild(domain);
+					buttons.appendChild(p);
+					buttons.appendChild(submit);
+					forms.appendChild(buttons);
+					login.appendChild(header);
+					login.appendChild(forms);
+
+					submit.addEventListener('click', function() {
+						life.claim(domain.value, email.value, (payload) => {
+							socket.send(payload);
+						})
+					})
+
+					document.querySelector('#Login').appendChild(login);
+				})
 			}
 		</script>
 	</head>
@@ -124,10 +168,10 @@
 		<div id="Login">
 			<div class="header">Manage domain(s)</div>
 			<div class="forms">
-				<input class="inputField" type="text" id="username">
-				<input class="inputField" type="password" id="password">
+				<input class="inputField" type="text" id="username" placeholder="Username">
+				<input class="inputField" type="password" id="password" placeholder="Password">
 				<div class="buttons">
-					<a href="/claim.html">Claim Domain</a>
+					<p id="claim">Claim Domain</p>
 					<button class="inputField button" id="login">Login</button>
 				</div>
 			</div>
@@ -211,18 +255,18 @@
 				bloader.load( "obj/female02/Female02_bin.js", function( geometry ) {
 
 					createMesh( geometry, scene, 4.05, -1000, -350,    0, 0xffdd44, true );
-					createMesh( geometry, scene, 4.05,     0, -350,    0, 0xffffff, true );
-					createMesh( geometry, scene, 4.05,  1000, -350,  400, 0xff4422, true );
-					createMesh( geometry, scene, 4.05,   250, -350, 1500, 0xff9955, true );
+					createMesh( geometry, scene, 4.05,     0, -350,    0, 0xF0A868, true );
+					createMesh( geometry, scene, 4.05,  1000, -350,  400, 0x33aadd, true );
+					createMesh( geometry, scene, 4.05,   250, -350, 1500, 0xBDD4E7, true );
 					createMesh( geometry, scene, 4.05,   250, -350, 2500, 0xff77dd, true );
 
 				} );
 
 				bloader.load( "obj/male02/Male02_bin.js", function( geometry ) {
 
-					createMesh( geometry, scene, 4.05,  -500, -350,   600, 0xff7744, true );
-					createMesh( geometry, scene, 4.05,   500, -350,     0, 0xff5522, true );
-					createMesh( geometry, scene, 4.05,  -250, -350,  1500, 0xff9922, true );
+					createMesh( geometry, scene, 4.05,  -500, -350,   600, 0xBDD4E7, true );
+					createMesh( geometry, scene, 4.05,   500, -350,     0, 0x0088bb, true );
+					createMesh( geometry, scene, 4.05,  -250, -350,  1500, 0x00ff66, true );
 					createMesh( geometry, scene, 4.05,  -250, -350, -1500, 0xff99ff, true );
 
 				} );

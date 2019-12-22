@@ -59,6 +59,25 @@ class _olife {
 				console.warn('No function given to login.')
 		})
 	}
+
+	claim(domain, email, func=null) {
+		let payload = {
+			"alg": this.mode,
+			"_module": "claim",
+			"domain": this.domain,
+			"claim": domain,
+			"admin": email
+		}
+
+		console.log('Signing with key:', this.key);
+		this.sign(payload, this.key, (signature) => {
+			payload['sign'] = signature;
+			if(func)
+				func(payload);
+			else
+				console.warn('No function given to claim.')
+		})
+	}
 }
 
 window.olife = _olife;
