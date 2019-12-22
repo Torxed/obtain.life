@@ -113,7 +113,7 @@ __builtins__.__dict__['config'] = safedict({
 		'vhosts': {
 			'obtain.life': {
 				'web_root': './web_content',
-				'index': 'index.html'
+				'index': ['index.html', 'index.py']
 			}
 		}
 	}
