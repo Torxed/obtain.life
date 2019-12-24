@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Obtain Life's portal</title>
+	<script type="text/javascript" src="/olife.js"></script>
+	<script type="text/javascript">
+		let socket = null; // Create a global socket element, initate it with `new slimWebSocket();` later
+		
+		// Loading JavaScript from a cross-site resource is blocked.
+		// But there's nothing stopping us from downloading the script
+		// as a text-blob and placing it within the <script> </ script> tags,
+		// which causes the browser to parse it, but not as a forrain object.
+		//
+		// #LoadingScriptsFromGithub
+
+		let xhr = new XMLHttpRequest();
+		xhr.open("GET", 'https://raw.githubusercontent.com/Torxed/slimWebSocket/master/slimWebSocket.js', true);
+		xhr.onreadystatechange = function() {
+			if (this.readyState === XMLHttpRequest.DONE && this.status === 200) {
+				let script = document.createElement('script');
+				script.type = 'text/javascript';
+				script.innerHTML = this.responseText;
+				document.head.appendChild(script);
+
+				socket = new slimWebSocket();
+
+				socket.subscribe('profile', (payload) => {
+					show_profile(payload);
+				})
+			}
+		}
+		xhr.send();
+	</script>
+	<script type="text/javascript">
+		let secret = "c8ee4162d1df58aadd4f9e70df2744ed13ba1d37e8bf5946b87aedb71d5c07da";
+		let token = localStorage.getItem('obtain.life.token');
+
+		if(typeof token === 'undefined' || !token) {
+			window.location.href = '/';
+		}
+
+		function show_profile(payload) {
+			if(payload['status'] !== 'success') {
+				localStorage.removeItem('obtain.life.token');
+				window.location.href = '/';
+				return;
+			}
+			
+			let main = document.querySelector('#main');
+			let profile = document.createElement('div');
+			let account_id = document.createElement('h3');
+			let account_data = document.createElement('div');
+			let save = document.createElement('button');
+
+			account_id.innerHTML = payload['account_id'];
+			save.innerHTML = 'Save & Update information';
+
+			profile.classList = 'profile';
+			profile.appendChild(account_id);
+			account_data.classList = 'information';
+
+			Object.keys(payload['profile']).forEach((key) => {
+				let label = document.createElement('label');
+				let input = document.createElement('input');
+
+				if(key == 'password')
+					input.type = 'password';
+				else
+					input.type = 'text';
+
+				label.innerHTML = key;
+				input.value = payload['profile'][key];
+				account_data.appendChild(label);
+				account_data.appendChild(input);
+			})
+
+			save.addEventListener('click', function() {
+				console.log('Saving information is not yet implemented.');
+			})
+
+			profile.appendChild(account_data);
+			profile.appendChild(save);
+			main.innerHTML = '';
+			main.appendChild(profile);
+
+		}
+
+		window.onload = function() {
+			let life = new olife('obtain.life', 'HS256', secret);
+
+			let interval = setInterval(() => {
+				if(socket) {
+					clearInterval(interval);
+					life.get_profile(null, token, (payload) => {
+						console.log(payload);
+						socket.send(payload);
+					});
+				}
+			}, 10);
+		}
+	</script>
+	<style type="text/css">
+		:root {
+			--bg: #F6F9FC;
+			--dark: #333333;
+			--blue: #0088CC;
+			--blueLogo: #1487BD;
+			--light-blue: #33aadd;
+			--light-blue-border: #0088bb;
+
+			--links: #666666;
+			--links-hover: #FFFFFF;
+
+			--light-grey: #ecf2f5;
+			--light-grey-darker: #D4E1E8;
+			--light-grey-border: #bcd;
+
+			--power-off: #F06060;
+			--power-on: #8CBEB2;
+		}
+
+		body {
+			background-color: var(--bg);
+			margin: 0px;
+			padding: 0px;
+			font: normal 100% sans-serif;
+		}
+
+		.container {
+			display: flex;
+			flex-direction: column;
+			height: 100%;
+		}
+
+			.menu {
+				background-color: var(--dark);
+				padding: 15px;
+				border-bottom: 5px solid var(--blue);
+
+				display: flex;
+				flex-direction: row;
+
+				color: #FFFFFF;
+			}
+
+		.grower {
+			flex-grow: 1;
+		}
+
+		.main {
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			align-items: center;
+		}
+
+			.profile {
+				display: flex;
+				flex-direction: column;
+				margin-right: auto;
+				margin-left: 10px;
+			}
+
+				.information {
+					display: flex;
+					flex-direction: column;
+				}
+
+				.profile input {
+					border-radius: 5px;
+					padding: 4px;
+					border: 1px solid var(--dark);
+				}
+
+				.profile label {
+					margin-top: 5px;
+				}
+
+				/*.information label::first-letter {
+					text-transform: uppercase;
+				}*/
+
+				button {
+					margin-top: 10px;
+					border: 1px solid #272727;
+					border-radius: 4px;
+					padding: 5px;
+				}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<div class="menu grower">
+			Menu
+		</div>
+		<div class="main" id="main">
+
+		</div>
+	</div>
+</body>
+</html>

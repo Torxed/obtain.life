@@ -5,7 +5,7 @@ from time import time
 from os import walk, urandom
 from os.path import isfile, isdir
 from systemd.journal import JournalHandler
-from mailer import email
+from mailer import email as _email
 
 ## https://support.google.com/a/answer/2956491?hl=en&authuser=1
 
@@ -47,7 +47,7 @@ def _log(*msg, origin='UNKNOWN', level=5, **kwargs):
 		else:
 			log_adapter.debug(' '.join(msg))
 
-def uid(seed=None, bits=32):
+def _uid(seed=None, bits=32):
 	if not seed:
 		seed = urandom(bits) + bytes(str(time()), 'UTF-8')
 	return hashlib.sha512(seed).hexdigest().upper()
@@ -99,13 +99,18 @@ class _safedict(dict):
 			copy[key] = val
 		return copy
 
+	def dumps(self, *args, **kwargs):
+		self.dump(*args, **kwargs)
+
 	def copy(self, *args, **kwargs):
 		return super(safedict, self).copy(*args, **kwargs)
 
 __builtins__.__dict__['LOG_LEVEL'] = 4
 __builtins__.__dict__['log'] = _log
+__builtins__.__dict__['email'] = _email
 __builtins__.__dict__['safedict'] = _safedict
 __builtins__.__dict__['sockets'] = safedict()
+__builtins__.__dict__['uid'] = _uid
 __builtins__.__dict__['config'] = safedict({
 	'slimhttp': {
 		'web_root': './web_content',
@@ -123,16 +128,17 @@ from slimHTTP import slimhttpd
 from spiderWeb import spiderWeb
 from slimSocket import slimSocket
 
-if isfile('datstore.json'):
-	with open('datstore.json', 'r') as fh:
-		log('Loading sample datastore from {{datstore.json}}', origin='STARTUP', level=5)
-		datastore = safedict(json.load(fh))
+if isfile('datastore.json'):
+	with open('datastore.json', 'r') as fh:
+		log('Loading sample datastore from {{datastore.json}}', origin='STARTUP', level=5)
+		_datastore = safedict(json.load(fh))
 
 		#datastore = dict_to_safedict(datastore)
 else:
 	log(f'Starting with a clean database (reason: couldn\'t find {{datastore.json}})', origin='STARTUP', level=5)
-	datastore = safedict()
+	_datastore = safedict()
 
+__builtins__.__dict__['datastore'] = _datastore
 
 if not 'domains' in datastore: datastore['domains'] = {}
 if not 'id' in datastore:
@@ -185,8 +191,8 @@ def save_datastore():
 	if isfile('datastore.json'):
 		shutil.move('datastore.json', 'datastore.json.bkp')
 
-	with open('datstore.json', 'w') as fh:
-		log('Saving datastore to {{datstore.json}}', origin='save_datastore', level=5)
+	with open('datastore.json', 'w') as fh:
+		log('Saving datastore to {{datastore.json}}', origin='save_datastore', level=5)
 		json.dump(datastore, fh)
 
 def HMAC_256(data, key):
@@ -291,6 +297,10 @@ class parser():
 			for response in self.claim(client, data, headers, fileno, addr, *args, **kwargs):
 				yield response
 
+		elif '_module' in data and data['_module'] == 'profile':
+			for response in self.profile(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
 	def login(self, client, data, headers, fileno, addr, *args, **kwargs):
 		domain_id = datastore['domains'][data['domain']]
 		if not 'username' in data: return None
@@ -362,12 +372,118 @@ class parser():
 	def subscribe(self, client, data, headers, fileno, addr, *args, **kwargs):
 		pass
 
+	def profile(self, client, data, headers, fileno, addr, *args, **kwargs):
+		domain_id = datastore['domains'][data['domain']]
+		if not 'token' in data: return None
+		if not data['token'] in datastore['tokens']:
+			# Block client
+			response = {'_module' : 'profile', 'status' : 'failed', 'alg' : data['alg'], 'message' : 'Invalid token'}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+			yield response
+			return None
+		myself = True
+
+		user = datastore['tokens'][data['token']]['user']
+		domain = datastore['tokens'][data['token']]['domain']
+		if myself:
+			response = {'status' : 'success', '_module' : 'profile', 'account_id' : user, 'profile' : datastore['id'][domain_id]['users'][user].dump()}
+		else:
+			response = {'status' : 'success', '_module' : 'profile', 'profile' : datastore['id'][domain_id]['users'][user].dump()}
+		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+		yield response;
+
 	def claim(self, client, data, headers, fileno, addr, *args, **kwargs):
 		if not 'admin' in data: return None
 		if not 'claim' in data: return None
 
 		domain_id = datastore['domains'][data['domain']]
 		log(f'{data["admin"]} is claiming {data["claim"]}.', level=4, origin="claim")
+
+		if not 'claims' in datastore: datastore['claims'] = {}
+		if not data['claim'] in datastore['claims']: datastore['claims'][data['claim']] = {}
+
+		## Create a challenge slot for this domain, and point it to a admin.
+		challenge = uid()
+		print(f"Challenge for domain '{data['claim']}' is: {challenge}")
+		datastore['claims'][data['claim']][challenge] = data['admin']
+
+		TEXT_TEMPLATE = """\
+To claim a domain, one of two simple things is required.
+Either add a TXT record on your DNS server, or place a .txt file in your web root
+verifying that you have control over the domain you're trying to claim.
+Below follows instructions for the two options.
+
+DNS option:
+  Add a TXT record called obtain.life.{DOMAIN}. to your domain {DOMAIN}.
+  After that, click this link to begin the <u>DNS verification process</u>:
+
+  * {DNS_URL}
+
+HTTPS option:
+  Your remote server needs to accept TLS (HTTPS) traffic, we will
+  not try to verify against anything but TLS enabled servers.
+  In your web-root, add the following .txt file:
+  https://{DOMAIN}/obtain.life.txt
+
+  Once that is done, click this link to begin the <u>HTTPS verification process</u>.
+  * {HTTPS_URL}
+
+In both cases, the value of the record/file should be:
+  {challenge}
+
+Once the verification process is complete, {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN} will recieve
+an email where instructions to set a password will be sent out.
+
+Best of luck //Obtain Life IM team
+"""
+
+		HTML_TEMPLATE = """\
+<html>
+	<head>
+		<title>Claim {DOMAIN}</title>
+	</head>
+	<body>
+		<div>
+			<h3>To claim a domain:</h3>
+			<span>
+				To claim a domain, one of two simple things is required.<br>
+				Either add a TXT record on your DNS server, or place a .txt file in your web root
+				verifying that you have control over the domain you're trying to claim.<br>
+				Below follows instructions for the two options.<br>
+			</span>
+			<h4>DNS option:</h4>
+			<span>
+				Add a TXT record called <b>obtain.life.{DOMAIN}</b>. to your domain {DOMAIN}.<br>
+  				After that, click this link to begin the <u>DNS verification process</u>:
+  				<ul>
+					<li>{DNS_URL}</li>
+				</ul>
+			</span>
+			<h4>HTTPS option:</h4>
+			<span>
+				Your remote server needs to accept TLS (HTTPS) traffic,<br>
+				<u>we will not try to verify against anything but TLS enabled servers</u>.<br>
+				In your web-root, add the following .txt file:
+				<ul>
+					<li><a href="https://{DOMAIN}/obtain.life.txt">https://{DOMAIN}/obtain.life.txt</a></li>
+				</ul>
+				Once that is done, click this link to begin the <u>HTTPS verification process</u>.<br>
+				<ul>
+					<li>{HTTPS_URL}</li>
+				</ul>
+				In both cases, the value of the record/file should be:<br>
+				<b>{challenge}</b><br>
+				<br>
+				Once the verification process is complete, {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN} will recieve
+				an email where instructions to set a password will be sent out.<br>
+				<br>
+				Best of luck <a href="https://obtain.life">//Obtain Life IM team</a>
+			</span>
+		</div>
+	</body>
+</html>"""
 
 		configuration = {
 			'DOMAIN' : data['claim'],
@@ -378,12 +494,12 @@ class parser():
 			'RAW_TIME' : time(),
 			'SUBJECT' : f'Claim domain: {data["claim"]}',
 			'TRY_ONE_MAILSERVER' : False,
-			'TEXT_TEMPLATE' : None,
-			'HTML_TEMPLATE' : None,
+			'TEXT_TEMPLATE' : TEXT_TEMPLATE,
+			'HTML_TEMPLATE' : HTML_TEMPLATE,
 			'DKIM_KEY' : "/etc/sshmailer/sshmailer.pem",
 			'DNS_URL' : f'https://obtain.life/verify/?mode=DNS&domain={data["claim"]}',
 			'HTTPS_URL' : f'https://obtain.life/verify/?mode=HTTPS&domain={data["claim"]}',
-			'challenge' : 'testing'
+			'challenge' : challenge
 		}
 
 		if email(configuration):
@@ -396,8 +512,6 @@ class parser():
 			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
 
 			yield response
-
-
 
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)

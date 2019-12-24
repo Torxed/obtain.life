@@ -46,84 +46,6 @@ def log(*msg, origin='UNKNOWN', level=5, **kwargs):
 		else:
 			log_adapter.debug(' '.join(msg))
 
-def load_text_template():
-	return """\
-To claim a domain, one of two things is required.
-Either add a DNS record or place a TXT file in your web root
-verifying that you have control over the domain you're trying
-to claim.
-
-DNS option:
-  Add a TXT record called obtain.life.{DOMAIN}. to your domain {DOMAIN}.
-  After that, click this link to begin the <u>DNS verification process</u>:
-
-  * {DNS_URL}
-
-HTTPS option:
-  Your remote server needs to accept TLS (HTTPS) traffic, we will
-  not try to verify against anything but TLS enabled servers.
-  In your web-root, add the following .txt file:
-  https://{DOMAIN}/obtain.life.txt
-
-  Once that is done, click this link to begin the <u>HTTPS verification process</u>.
-  * {HTTPS_URL}
-
-In both cases, the value of the record/file should be:
-  {challenge}
-
-Once the verification process is complete, {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN} will recieve
-an email where instructions to set a password will be sent out.
-
-Best of luck //Obtain Life IM team
-"""
-
-def load_html_template():
-	return """\
-<html>
-	<head>
-		<title>Claim {DOMAIN}</title>
-	</head>
-	<body>
-		<div>
-			<h3>To claim a domain:</h3>
-			<span>
-				To claim a domain, one of two things is required.<br>
-				Either add a DNS record or place a TXT file in your web root
-				verifying that you have control over the domain you're trying
-				to claim.
-			</span>
-			<h4>DNS option:</h4>
-			<span>
-				Add a TXT record called <b>obtain.life.{DOMAIN}</b>. to your domain {DOMAIN}.<br>
-  				After that, click this link to begin the <u>DNS verification process</u>:
-  				<ul>
-					<li>{DNS_URL}</li>
-				</ul>
-			</span>
-			<h4>HTTPS option:</h4>
-			<span>
-				Your remote server needs to accept TLS (HTTPS) traffic,<br>
-				<u>we will not try to verify against anything but TLS enabled servers</u>.<br>
-				In your web-root, add the following .txt file:
-				<ul>
-					<li><a href="https://{DOMAIN}/obtain.life.txt">https://{DOMAIN}/obtain.life.txt</a></li>
-				</ul>
-				Once that is done, click this link to begin the <u>HTTPS verification process</u>.<br>
-				<ul>
-					<li>{HTTPS_URL}</li>
-				</ul>
-				In both cases, the value of the record/file should be:<br>
-				<b>{challenge}</b><br>
-				<br>
-				Once the verification process is complete, {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN} will recieve
-				an email where instructions to set a password will be sent out.<br>
-				<br>
-				Best of luck <a href="https://obtain.life">//Obtain Life IM team</a>
-			</span>
-		</div>
-	</body>
-</html>"""
-
 def sign_email(email, configuration, selector='default', domain=None):
 	if not domain: domain = configuration['DOMAIN']
 	if type(selector) != bytes: selector = bytes(selector, 'UTF-8')
@@ -148,6 +70,9 @@ def sign_email(email, configuration, selector='default', domain=None):
 	return sig.lstrip(b"DKIM-Signature: ").decode('UTF-8')
 
 def email(configuration):
+	if not 'TEXT_TEMPLATE' in configuration or configuration['TEXT_TEMPLATE'] is None: return None
+	if not 'HTML_TEMPLATE' in configuration or configuration['HTML_TEMPLATE'] is None: return None
+
 	configuration['HASH'] = md5(bytes('{SSH_MAIL_USER_FROM}@{SSH_MAIL_USER_FROMDOMAIN}+{SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN}'.format(**configuration), 'UTF-8')).hexdigest()
 	configuration['Message-ID'] = '<{RAW_TIME}.{HASH}@{SSH_MAIL_USER_FROMDOMAIN}>'.format(**configuration)
 
@@ -166,8 +91,8 @@ def email(configuration):
 	email['Message-ID'] = configuration['Message-ID']
 	email.preamble = configuration['SUBJECT']
 
-	text = load_text_template().format(**configuration)
-	html = load_html_template().format(**configuration)
+	text = configuration['TEXT_TEMPLATE'].format(**configuration)
+	html = configuration['HTML_TEMPLATE'].format(**configuration)
 
 	email_body_text = MIMEText(text, 'plain')
 	email_body_html = MIMEBase('text', 'html')

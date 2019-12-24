@@ -78,6 +78,29 @@ class _olife {
 				console.warn('No function given to claim.')
 		})
 	}
+
+	get_profile(userid=null, token=null, func=null) {
+		if(!token) {
+			console.warn('No token given to get_profile, can\'t request a profile without it.');
+			return;
+		}
+
+		let payload = {
+			"alg": this.mode,
+			"_module": "profile",
+			"token" : token,
+			"domain": this.domain
+		}
+
+		console.log('Signing with key:', this.key);
+		this.sign(payload, this.key, (signature) => {
+			payload['sign'] = signature;
+			if(func)
+				func(payload);
+			else
+				console.warn('No function given to claim.')
+		})
+	}
 }
 
 window.olife = _olife;

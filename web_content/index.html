@@ -94,6 +94,10 @@
 					document.head.appendChild(script);
 
 					socket = new slimWebSocket();
+					socket.subscribe('auth', (data) => {
+						localStorage.setItem('obtain.life.token', data['token']);
+						window.location.href = '/portal/';
+					})
 				}
 			}
 			xhr.send();
@@ -101,64 +105,69 @@
 		<script type="text/javascript" src="/olife.js"></script>
 		<script type="text/javascript">
 			let secret = "c8ee4162d1df58aadd4f9e70df2744ed13ba1d37e8bf5946b87aedb71d5c07da";
+			let token = localStorage.getItem('obtain.life.token');
 
 			window.onload = function() {
-				let life = new olife('obtain.life', 'HS256', secret);
-				
-				document.querySelector('#login').addEventListener('click', function() {
-					let username = document.querySelector('#username').value;
-					let password = document.querySelector('#password').value;
+				if(typeof token !== 'undefined' && token) {
+					window.location.href = '/portal/';
+				} else {
+					let life = new olife('obtain.life', 'HS256', secret);
+					
+					document.querySelector('#login').addEventListener('click', function() {
+						let username = document.querySelector('#username').value;
+						let password = document.querySelector('#password').value;
 
-					life.login(username, password, (payload) => {
-						socket.send(payload)
-					});
-				})
-
-				document.querySelector('#claim').addEventListener('click', function() {
-					document.querySelector('#Login').innerHTML = '';
-
-					let login = document.createElement('div');
-					let header = document.createElement('div');
-					let forms = document.createElement('div');
-					let buttons = document.createElement('div');
-					let email = document.createElement('input');
-					let domain = document.createElement('input');
-					let p = document.createElement('p');
-					let submit = document.createElement('button');
-
-					header.classList = 'header';
-					forms.classList = 'forms';
-					email.classList = 'inputField'; 
-					domain.classList = 'inputField';
-					buttons.classList = 'buttons';
-					p.classList = 'claim';
-					submit.classList = 'inputField button';
-
-					header.innerHTML = 'Claim domain';
-					email.placeholder = 'Admin email to domain claim with...'
-					domain.placeholder = 'Domain to claim/register..'
-					p.innerHTML = 'Login page';
-					submit.innerHTML = 'Claim Domain';
-
-					email.value = 'anton@hvornum.se';
-					domain.value = 'hvornum.se';
-
-					forms.appendChild(email);
-					forms.appendChild(domain);
-					buttons.appendChild(p);
-					buttons.appendChild(submit);
-					forms.appendChild(buttons);
-					login.appendChild(header);
-					login.appendChild(forms);
-
-					submit.addEventListener('click', function() {
-						life.claim(domain.value, email.value, (payload) => {
-							socket.send(payload);
-						})
+						life.login(username, password, (payload) => {
+							socket.send(payload)
+						});
 					})
 
-					document.querySelector('#Login').appendChild(login);
-				})
+					document.querySelector('#claim').addEventListener('click', function() {
+						document.querySelector('#Login').innerHTML = '';
+
+						let login = document.createElement('div');
+						let header = document.createElement('div');
+						let forms = document.createElement('div');
+						let buttons = document.createElement('div');
+						let email = document.createElement('input');
+						let domain = document.createElement('input');
+						let p = document.createElement('p');
+						let submit = document.createElement('button');
+
+						header.classList = 'header';
+						forms.classList = 'forms';
+						email.classList = 'inputField'; 
+						domain.classList = 'inputField';
+						buttons.classList = 'buttons';
+						p.classList = 'claim';
+						submit.classList = 'inputField button';
+
+						header.innerHTML = 'Claim domain';
+						email.placeholder = 'Admin email to domain claim with...'
+						domain.placeholder = 'Domain to claim/register..'
+						p.innerHTML = 'Login page';
+						submit.innerHTML = 'Claim Domain';
+
+						email.value = 'anton@hvornum.se';
+						domain.value = 'hvornum.se';
+
+						forms.appendChild(email);
+						forms.appendChild(domain);
+						buttons.appendChild(p);
+						buttons.appendChild(submit);
+						forms.appendChild(buttons);
+						login.appendChild(header);
+						login.appendChild(forms);
+
+						submit.addEventListener('click', function() {
+							life.claim(domain.value, email.value, (payload) => {
+								socket.send(payload);
+							})
+						})
+
+						document.querySelector('#Login').appendChild(login);
+					})
+				}
 			}
 		</script>
 	</head>
