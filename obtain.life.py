@@ -487,6 +487,7 @@ Best of luck //Obtain Life IM team
 
 		configuration = {
 			'DOMAIN' : data['claim'],
+			'SIGN_DOMAIN' : 'obtain.life',
 			'SSH_MAIL_USER_FROM' : 'no-reply', # without @
 			'SSH_MAIL_USER_FROMDOMAIN' : 'obtain.life', # without @
 			'SSH_MAIL_USER_TO' : data['admin'].split('@',1)[0],

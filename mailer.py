@@ -47,7 +47,7 @@ def log(*msg, origin='UNKNOWN', level=5, **kwargs):
 			log_adapter.debug(' '.join(msg))
 
 def sign_email(email, configuration, selector='default', domain=None):
-	if not domain: domain = configuration['DOMAIN']
+	if not domain: domain = configuration['SIGN_DOMAIN']
 	if type(selector) != bytes: selector = bytes(selector, 'UTF-8')
 	if type(domain) != bytes: domain = bytes(domain, 'UTF-8')
 
