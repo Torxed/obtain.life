@@ -22,7 +22,7 @@ A basic example without any application data would look like this:
 ```json
 	{
 		"alg" : "HS256",
-		"sign" : hmac.new(shared_key, msg=data_without_sign_key, digestmod=hashlib.sha256).hexdigest().upper()
+		"sign" : hmac.new(shared_key,msg=data_without_sign_key,digestmod=hashlib.sha256).hexdigest().upper()
 	}
 ```
 
