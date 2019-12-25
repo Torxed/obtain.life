@@ -17,7 +17,16 @@ It contains the same principle as JWT, but with a smaller footprint.
 Instead of three seperate JSON payloads, concatinated with dots,<br>
 obtain.life is a single JSON payload with a signature baked in before sending.
 
-More info in the [wiki](https://github.com/Torxed/obtain.life/wiki).
+A basic example without any application data would look like this:
+
+```json
+	{
+		"alg" : "HS256",
+		"sign" : hmac.new(shared_key, msg=data_without_sign_key, digestmod=hashlib.sha256).hexdigest().upper()
+	}
+```
+
+More info on this and other algorithms can be found in the [wiki](https://github.com/Torxed/obtain.life/wiki).
 
 # How to login/register?
 
