@@ -5,78 +5,7 @@ HTML_TEMPLATE = """
 <html>
 <head>
 	<title>Set password</title>
-	<style type="text/css">
-		body {{
-			background-color: #000;
-
-			color: #fff;
-			font-family: sans-serif;
-			font-size:13px;
-			font-weight: bold;
-
-			margin: 0px;
-			padding: 0px;
-
-			display: flex;
-			flex-direction: column;
-			justify-content: center;
-			align-items: center;
-
-			width: 100%;
-			height: 100%;
-
-			position: absolute;
-		}}
-
-		.container {{
-			display: flex;
-			flex-direction: column;
-			margin-top: auto;
-			margin-bottom: auto;
-
-			background-color: rgba(120, 120, 120, 0.85);
-			overflow: hidden;
-
-			border-top-left-radius: 10px;
-			border-top-right-radius: 10px;
-		}}
-
-			.header {{
-				background-color: #282828;
-				border-bottom: 1px solid #222222;
-				padding: 10px;
-				color: #8CBEB2;
-			}}
-
-			label {{
-				padding: 5px;
-			}}
-
-			label:before {{
-				content: "Admin account: ";
-				color: #8CBEB2;
-			}}
-
-			.inputField {{
-				border: 1px solid #272727;
-				border-radius: 4px;
-				padding: 5px;
-				margin: 2px;
-			}}
-
-			.inputs {{
-				display: flex;
-				flex-direction: column;
-			}}
-
-			.inputs, span {{
-				padding: 10px;
-			}}
-
-			b {{
-				color: #f0bd60;
-			}}
-	</style>
+	<link rel="stylesheet" type="text/css" href="/resources/styles/mini.css">
 	<script type="text/javascript">
 		let OTP = '{OTP}';
 
