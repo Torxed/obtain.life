@@ -6,6 +6,8 @@ from os import walk, urandom
 from os.path import isfile, isdir
 from systemd.journal import JournalHandler
 from mailer import email as _email
+from base64 import b64encode, b64decode
+from random import randint
 
 ## https://support.google.com/a/answer/2956491?hl=en&authuser=1
 
@@ -15,6 +17,10 @@ import hashlib
 def sig_handler(signal, frame):
 	http.close()
 	https.close()
+
+	with open('datastore.json', 'w') as fh:
+		log('Saving datastore to {{datastore.json}}', origin='SHUTDOWN', level=5)
+		json.dump(datastore, fh)
 	exit(0)
 signal.signal(signal.SIGINT, sig_handler)
 
@@ -51,6 +57,19 @@ def _uid(seed=None, bits=32):
 	if not seed:
 		seed = urandom(bits) + bytes(str(time()), 'UTF-8')
 	return hashlib.sha512(seed).hexdigest().upper()
+
+def _short_uid(seed=None, bits=32):
+	if not seed:
+		seed = urandom(bits) + bytes(str(time()), 'UTF-8')
+	return hashlib.sha1(seed).hexdigest().upper()
+
+def _allowed_user(client):
+	if client.addr in datastore['blocks']: return False
+	return True
+
+def _block(client):
+	datastore['blocks'][client.addr] = time()
+	return None
 
 class _safedict(dict):
 	def __init__(self, *args, **kwargs):
@@ -95,7 +114,8 @@ class _safedict(dict):
 			if type(key) == bytes and b'*' in key: continue
 			elif type(key) == str and '*' in key: continue
 			elif type(val) == dict or type(val) == safedict: val = val.dump()
-			elif key in ('password', 'secret', 'privkey'): val = '****'
+			
+			if not 'include_sensitives' in kwargs and key in ('password', 'secret', 'privkey', 'service_secret'): val = None
 			copy[key] = val
 		return copy
 
@@ -111,6 +131,9 @@ __builtins__.__dict__['email'] = _email
 __builtins__.__dict__['safedict'] = _safedict
 __builtins__.__dict__['sockets'] = safedict()
 __builtins__.__dict__['uid'] = _uid
+__builtins__.__dict__['block'] = _block
+__builtins__.__dict__['allowed_user'] = _allowed_user
+__builtins__.__dict__['short_uid'] = _short_uid
 __builtins__.__dict__['config'] = safedict({
 	'slimhttp': {
 		'web_root': './web_content',
@@ -131,8 +154,10 @@ from slimSocket import slimSocket
 if isfile('datastore.json'):
 	with open('datastore.json', 'r') as fh:
 		log('Loading sample datastore from {{datastore.json}}', origin='STARTUP', level=5)
-		_datastore = safedict(json.load(fh))
-
+		try:
+			_datastore = safedict(json.load(fh))
+		except:
+			_datastore = safedict()
 		#datastore = dict_to_safedict(datastore)
 else:
 	log(f'Starting with a clean database (reason: couldn\'t find {{datastore.json}})', origin='STARTUP', level=5)
@@ -169,8 +194,12 @@ if not 'id' in datastore:
 				"service_secret" : uid(),
 				"users" : {
 					"anton" : {"username" : "anton",
-								"password" : "test",
+								"password" : "YcciKR9A8es=&dcda8bd5e9a905d76aa2982b4ab8728b80a8c78fe7fdefa36c6d8000f2c3bf7a01c73907009a70219ce23905af73efb19d178d42c3fe4f1cad7529f4dea233e1",
 								"friendly_name" : "Anton Hvornum",
+								"roles" : [
+									"obtain.life.admin"
+								],
+								"domain" : "obtain.life",
 								"display_picture" : "https://avatars1.githubusercontent.com/u/861439?s=460&v=4"}
 				},
 				"auth_sessions" : {
@@ -196,11 +225,11 @@ def save_datastore():
 		json.dump(datastore, fh)
 
 def HMAC_256(data, key):
+	#print(f'Signing with key: {key}')
 	if type(data) == dict: data = json.dumps(data, separators=(',', ':'))
 	if type(data) != bytes: data = bytes(data, 'UTF-8')
 	if type(key) != bytes: key = bytes(key, 'UTF-8')
-	print(f'Signing with key: {key}')
-	print(json.dumps(json.loads(data.decode('UTF-8')), indent=4))
+	#print(json.dumps(json.loads(data.decode('UTF-8')), indent=4))
 
 	signature = hmac.new(key, msg=data, digestmod = hashlib.sha256).hexdigest().upper()
 	return signature
@@ -252,25 +281,20 @@ def signature_check(domain_id, data, key):
 
 	return None
 
-def allowed_user(client):
-	if client.addr in datastore['blocks']: return False
-	return True
-
-def block(client):
-	datastore['blocks'][client.addr] = time()
-
 class parser():
+	domain_id = None
 	def parse(self, client, data, headers, fileno, addr, *args, **kwargs):
 		if not allowed_user(client):
 			log(f'Client {client} is blocked, ignoring request.', level=4, origin='parser.parse')
 			return None
 
-		print('***', data)
+		print(json.dumps(data, indent=4))
 		if not 'alg' in data: return None
 		if not 'sign' in data or not data['sign']: return None
 		if not 'domain' in data: data['domain'] = 'obtain.life'
 
 		domain_id = datastore['domains'][data['domain']]
+		self.domain_id = domain_id
 		key = datastore['id'][domain_id]['secret']
 		server_signature = signature_check(domain_id, data, key)
 		if server_signature is not True:
@@ -289,6 +313,18 @@ class parser():
 			for response in self.login(client, data, headers, fileno, addr, *args, **kwargs):
 				yield response
 
+		elif '_module' in data and data['_module'] == '2FA':
+			for response in self.two_factor_auth(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
+		elif '_module' in data and data['_module'] == 'identity':
+			for response in self.identity(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
+		elif '_module' in data and data['_module'] == 'certificate':
+			for response in self.cerficiate(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
 		elif '_module' in data and data['_module'] == 'register':
 			for response in self.register(client, data, headers, fileno, addr, *args, **kwargs):
 				yield response
@@ -301,6 +337,62 @@ class parser():
 			for response in self.profile(client, data, headers, fileno, addr, *args, **kwargs):
 				yield response
 
+		elif '_module' in data and data['_module'] == 'domain':
+			for response in self.domain(client, data, headers, fileno, addr, *args, **kwargs):
+				yield response
+
+	def two_factor_auth(self, client, data, headers, fileno, addr, *args, **kwargs):
+		domain_id = datastore['domains'][data['domain']]
+		if not '2FA' in data: return None
+		if not data['2FA'] in datastore['2FA']:
+			log(f'2FA spraying from {client}', level=2, origin='2FA')
+
+			response = {'status' : 'failed', '_module' : '2FA', 'message' : 'You\'ve issued a incorrect token.'}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+			yield response
+			return None
+
+		code = datastore['2FA'][data['2FA']]['2FA']
+		username = datastore['2FA'][data['2FA']]['user']
+		domain = datastore['2FA'][data['2FA']]['domain']
+		if time()-datastore['2FA'][data['2FA']]['issue_time'] > 60:
+			log(f'2FA token has expired for {username} at {domain}', level=2, origin='2FA')
+			del(datastore['2FA'][data['2FA']])
+
+			response = {'status' : 'failed', '_module' : '2FA', 'message' : 'This token has expired.'}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+			yield response
+			return None
+
+		if not data['code'] == code:
+			log(f'User {username} @ {domain} has entered a incorrect 2FA code from {client}', level=3, origin='2FA')
+			return None
+
+		token = gen_id()
+
+		## Notify the backends:
+		backend_notification = {'_module' : 'auth', 'status' : 'success', 'user' : datastore['id'][domain_id]['users'][username], 'domain' : domain, 'token' : token, 'alg' : data['alg']}
+		backend_notification['sign'] = HMAC_256(backend_notification, datastore['id'][domain_id]['secret'])
+
+		for b_fileno in datastore['id'][domain_id]['subscribers']:
+			print(f'Sending notification to subscriber {b_fileno},', datastore['id'][domain_id]['subscribers'][b_fileno]['sock'])
+			datastore['id'][domain_id]['subscribers'][b_fileno]['sock'].send(backend_notification)
+
+		if 'obtain.life.username.map' in datastore['id'][domain_id]['users'][username]:
+			shadow_username = datastore['id'][domain_id]['users'][username]['obtain.life.username.map']
+			datastore['tokens'][token] = {'user' : shadow_username, 'time' : time(), 'domain' : domain, 'shadow_username' : username, 'shadow_domain' : 'obtain.life'}
+			log(f'Re-mapping user {username} to {shadow_username} at {domain}', level=4, origin='login')
+		else:
+			shadow_username = username
+			datastore['tokens'][token] = {'user' : shadow_username, 'time' : time(), 'domain' : domain}
+
+
+		response = {'_module' : 'auth', 'status' : 'success', 'token' : token, 'alg' : data['alg']}
+		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+		yield response
+
+
 	def login(self, client, data, headers, fileno, addr, *args, **kwargs):
 		domain_id = datastore['domains'][data['domain']]
 		if not 'username' in data: return None
@@ -312,25 +404,68 @@ class parser():
 			return None
 
 		username = data['username']
-		if data['password'] != datastore['id'][domain_id]['users'][username]['password']:
+		db_password = datastore['id'][domain_id]['users'][username]['password']
+		salt, password = db_password.split('&', 1)
+
+		if hashlib.sha512(b64decode(salt)+bytes(data['password'], 'UTF-8')).hexdigest() != password:
 			log(f'Password spraying from {client} on account {username}@{data["domain"]}', level=2, origin='signed_parse')
 			block(client)
 			return None
 
-		print('Logged in!')
-		token = gen_id()
+		_2FA = randint(1000, 9999)
+		_2FA_SERIAL = short_uid()
+		datastore['2FA'][_2FA_SERIAL] = {'2FA' : _2FA, 'user' : username, 'domain' : data['domain'], 'issue_time' : time()}
 
-		## Notify the backends:
-		backend_notification = {'_module' : 'auth', 'status' : 'success', 'user' : datastore['id'][domain_id]['users'][username], 'domain' : data['domain'], 'token' : token, 'alg' : data['alg']}
-		backend_notification['sign'] = HMAC_256(backend_notification, datastore['id'][domain_id]['secret'])
+		### EMAIL HERE
+		TEXT_TEMPLATE = f"""
+Here is your 2FA token for device {client.addr}.
 
-		for b_fileno in datastore['id'][domain_id]['subscribers']:
-			print(f'Sending notification to subscriber {b_fileno},', datastore['id'][domain_id]['subscribers'][b_fileno]['sock'])
-			datastore['id'][domain_id]['subscribers'][b_fileno]['sock'].send(backend_notification)
+{_2FA}
 
-		datastore['tokens'][token] = {'user' : data['username'], 'time' : time(), 'domain' : domain_id}
+Best wishes //Obtain.life
+"""
 
-		response = {'_module' : 'auth', 'status' : 'success', 'token' : token, 'sign' : None, 'alg' : data['alg']}
+		HTML_TEMPLATE = f"""
+<html>
+	<head>
+		<title>2FA token for device {client.addr}</title>
+	</head>
+	<body>
+		<div>
+			<span>
+				Here is your 2FA token for device {client.addr}.
+			</span>
+			<br>
+			<span>
+				{_2FA}
+			</span>
+			<br>
+			<span>
+				Best wishes //Obtain.life
+			</span>
+		</div>
+	</body>
+</html>
+"""
+
+		contact_mail = datastore['id'][domain_id]['users'][username]['email']
+
+		mail_config = {
+			'SSH_MAIL_USER_FROM' : 'no-reply', # without @
+			'SSH_MAIL_USER_FROMDOMAIN' : 'obtain.life', # without @
+			'SSH_MAIL_USER_TO' : contact_mail.split('@',1)[0],
+			'SSH_MAIL_USER_TODOMAIN' : contact_mail.split('@',1)[1],
+			'RAW_TIME' : time(),
+			'SUBJECT' : f'2FA token for device {client.addr}',
+			'TRY_ONE_MAILSERVER' : False,
+			'TEXT_TEMPLATE' : TEXT_TEMPLATE,
+			'HTML_TEMPLATE' : HTML_TEMPLATE,
+			'DKIM_KEY' : "/etc/sshmailer/sshmailer.pem",
+			'SIGN_DOMAIN' : 'obtain.life'
+		}
+
+		email(mail_config)
+		response = {'_module' : 'auth', 'status' : 'success', '2FA' : _2FA_SERIAL, 'alg' : data['alg']}
 		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
 
 		yield response
@@ -364,13 +499,43 @@ class parser():
 
 			yield response
 
-		elif data['service'] == 'domain':
-			pass
-			# Email user a challenge.
-			# Once the user presses the verification link, the verification process starts.
-
 	def subscribe(self, client, data, headers, fileno, addr, *args, **kwargs):
 		pass
+
+	def certificate(self, client, data, headers, fileno, addr, *args, **kwargs):
+		pass
+
+	def identity(self, client, data, headers, fileno, addr, *args, **kwargs):
+		pass
+
+	def domain(self, client, data, headers, fileno, addr, *args, **kwargs):
+		if not 'token' in data: return None #block(client)
+		if not data['token'] in datastore['tokens']:
+			# Block client
+			response = {'_module' : 'domain', 'status' : 'failed', 'alg' : data['alg'], 'message' : 'Invalid token'}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][self.domain_id]['secret'])
+
+			log(f'{client} tried accessing domain information without a correct access token', level=3, origin='domain')
+
+			yield response
+			return None
+
+		#datastore['tokens'][token] = {'user' : data['username'], 'time' : time(), 'domain' : domain_id}
+		token_info = datastore['tokens'][data['token']]
+		domain = token_info['domain']
+		domain_id = datastore['domains'][domain]
+		who = token_info['user']
+
+		if 'obtain.life.admin' in datastore['id'][domain_id]['users'][who]['roles']:
+			response = {'status' : 'success', '_module' : 'domain', 'domain' : datastore['id'][domain_id].dump(include_sensitives=True)}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+			yield response
+			return None
+
+		response = {'status' : 'failed', '_module' : 'domain', 'message' : 'Account roles prohibits exposing the secret.'}
+		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+		yield response
 
 	def profile(self, client, data, headers, fileno, addr, *args, **kwargs):
 		domain_id = datastore['domains'][data['domain']]
@@ -380,23 +545,63 @@ class parser():
 			response = {'_module' : 'profile', 'status' : 'failed', 'alg' : data['alg'], 'message' : 'Invalid token'}
 			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
 
+			log(f'Invalid token recieved by {client}, token: {data["token"]}', level=2, origin='profile')
 			yield response
 			return None
+
 		myself = True
+		token_info = datastore['tokens'][data['token']]
+		user = token_info['user']
+		domain = token_info['domain']
+		domain_id = datastore['domains'][domain]
 
-		user = datastore['tokens'][data['token']]['user']
-		domain = datastore['tokens'][data['token']]['domain']
-		if myself:
-			response = {'status' : 'success', '_module' : 'profile', 'account_id' : user, 'profile' : datastore['id'][domain_id]['users'][user].dump()}
+		if 'new_pwd' in data:
+			if myself:
+				db_old_password = datastore['id'][domain_id]['users'][user]['password']
+				salt, old_password = db_old_password.split('&', 1)
+
+				if hashlib.sha512(b64decode(salt)+bytes(data['old_pwd'], 'UTF-8')).hexdigest() == old_password:
+					salt = urandom(8)
+					new_password = b64encode(salt).decode('UTF-8')+'&'+hashlib.sha512(salt+bytes(data['new_pwd'], 'UTF-8')).hexdigest()
+
+					if 'shadow_username' in token_info:
+						shadow_domain_id = datastore['domains'][token_info['shadow_domain']]
+						datastore['id'][shadow_domain_id]['users'][token_info['shadow_username']]['password'] = new_password
+					datastore['id'][domain_id]['users'][user]['password'] = new_password
+
+					del(datastore['tokens'][data['token']])
+					token = gen_id()
+					datastore['tokens'][token] = {'user' : user, 'time' : time(), 'domain' : domain}
+					response = {'status' : 'success', 'alg' : data['alg'], '_module' : 'profile', 'change' : 'new_pwd', 'token' : token}
+
+					yield response
+				else:
+					log(f'{client} is trying to change password without correct old password.', level=2, origin='profile')
+					response = {'status' : 'failed', '_module' : 'profile', 'alg' : data['alg'], 'message' : 'Wrong old password supplied. To many failed attempts will lead to a account deactivation.'}
+					response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+					yield response
+			else:
+				log(f'{client} is trying to change password for another user.', level=2, origin='profile')
+				response = {'status' : 'failed', '_module' : 'profile', 'alg' : data['alg'], 'message' : 'Can not change passwords for other accounts.'}
+				response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+
+				yield response
 		else:
-			response = {'status' : 'success', '_module' : 'profile', 'profile' : datastore['id'][domain_id]['users'][user].dump()}
-		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
+			if myself:
+				response = {'status' : 'success', 'alg' : data['alg'], '_module' : 'profile', 'account_id' : user, 'profile' : datastore['id'][domain_id]['users'][user].dump()}
+			else:
+				response = {'status' : 'success', 'alg' : data['alg'], '_module' : 'profile', 'profile' : datastore['id'][domain_id]['users'][user].dump()}
+			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
 
-		yield response;
+			yield response
 
 	def claim(self, client, data, headers, fileno, addr, *args, **kwargs):
 		if not 'admin' in data: return None
 		if not 'claim' in data: return None
+		if data["claim"] in datastore['domains']:
+			log(f'Re-claim attempt on domain {data["claim"]} by {client}', level=3, origin='claim')
+			return None # Already claimed
 
 		domain_id = datastore['domains'][data['domain']]
 		log(f'{data["admin"]} is claiming {data["claim"]}.', level=4, origin="claim")
@@ -405,114 +610,15 @@ class parser():
 		if not data['claim'] in datastore['claims']: datastore['claims'][data['claim']] = {}
 
 		## Create a challenge slot for this domain, and point it to a admin.
-		challenge = uid()
+		challenge = short_uid()
 		print(f"Challenge for domain '{data['claim']}' is: {challenge}")
 		datastore['claims'][data['claim']][challenge] = data['admin']
+		datastore['claims'][data['claim']][client.addr[0]] = challenge
 
-		TEXT_TEMPLATE = """\
-To claim a domain, one of two simple things is required.
-Either add a TXT record on your DNS server, or place a .txt file in your web root
-verifying that you have control over the domain you're trying to claim.
-Below follows instructions for the two options.
+		response = {'_module' : 'claim', 'status' : 'success', 'domain' : data['claim'], 'challenge' : challenge, 'challenge_page' : '/challenge/'}
+		response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
 
-DNS option:
-  Add a TXT record called obtain.life.{DOMAIN}. to your domain {DOMAIN}.
-  After that, click this link to begin the <u>DNS verification process</u>:
-
-  * {DNS_URL}
-
-HTTPS option:
-  Your remote server needs to accept TLS (HTTPS) traffic, we will
-  not try to verify against anything but TLS enabled servers.
-  In your web-root, add the following .txt file:
-  https://{DOMAIN}/obtain.life.txt
-
-  Once that is done, click this link to begin the <u>HTTPS verification process</u>.
-  * {HTTPS_URL}
-
-In both cases, the value of the record/file should be:
-  {challenge}
-
-Once the verification process is complete, {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN} will recieve
-an email where instructions to set a password will be sent out.
-
-Best of luck //Obtain Life IM team
-"""
-
-		HTML_TEMPLATE = """\
-<html>
-	<head>
-		<title>Claim {DOMAIN}</title>
-	</head>
-	<body>
-		<div>
-			<h3>To claim a domain:</h3>
-			<span>
-				To claim a domain, one of two simple things is required.<br>
-				Either add a TXT record on your DNS server, or place a .txt file in your web root
-				verifying that you have control over the domain you're trying to claim.<br>
-				Below follows instructions for the two options.<br>
-			</span>
-			<h4>DNS option:</h4>
-			<span>
-				Add a TXT record called <b>obtain.life.{DOMAIN}</b>. to your domain {DOMAIN}.<br>
-  				After that, click this link to begin the <u>DNS verification process</u>:
-  				<ul>
-					<li>{DNS_URL}</li>
-				</ul>
-			</span>
-			<h4>HTTPS option:</h4>
-			<span>
-				Your remote server needs to accept TLS (HTTPS) traffic,<br>
-				<u>we will not try to verify against anything but TLS enabled servers</u>.<br>
-				In your web-root, add the following .txt file:
-				<ul>
-					<li><a href="https://{DOMAIN}/obtain.life.txt">https://{DOMAIN}/obtain.life.txt</a></li>
-				</ul>
-				Once that is done, click this link to begin the <u>HTTPS verification process</u>.<br>
-				<ul>
-					<li>{HTTPS_URL}</li>
-				</ul>
-				In both cases, the value of the record/file should be:<br>
-				<b>{challenge}</b><br>
-				<br>
-				Once the verification process is complete, {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN} will recieve
-				an email where instructions to set a password will be sent out.<br>
-				<br>
-				Best of luck <a href="https://obtain.life">//Obtain Life IM team</a>
-			</span>
-		</div>
-	</body>
-</html>"""
-
-		configuration = {
-			'DOMAIN' : data['claim'],
-			'SIGN_DOMAIN' : 'obtain.life',
-			'SSH_MAIL_USER_FROM' : 'no-reply', # without @
-			'SSH_MAIL_USER_FROMDOMAIN' : 'obtain.life', # without @
-			'SSH_MAIL_USER_TO' : data['admin'].split('@',1)[0],
-			'SSH_MAIL_USER_TODOMAIN' : data['admin'].split('@',1)[1],
-			'RAW_TIME' : time(),
-			'SUBJECT' : f'Claim domain: {data["claim"]}',
-			'TRY_ONE_MAILSERVER' : False,
-			'TEXT_TEMPLATE' : TEXT_TEMPLATE,
-			'HTML_TEMPLATE' : HTML_TEMPLATE,
-			'DKIM_KEY' : "/etc/sshmailer/sshmailer.pem",
-			'DNS_URL' : f'https://obtain.life/verify/?mode=DNS&domain={data["claim"]}',
-			'HTTPS_URL' : f'https://obtain.life/verify/?mode=HTTPS&domain={data["claim"]}',
-			'challenge' : challenge
-		}
-
-		if email(configuration):
-			response = {'_module' : 'claim', 'status' : 'success', 'domain' : data['claim']}
-			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
-
-			yield response
-		else:
-			response = {'_module' : 'claim', 'status' : 'failed', 'domain' : data['claim'], 'reason' : 'Could not e-mail the administrator.'}
-			response['sign'] = HMAC_256(json.dumps(response, separators=(',', ':')), datastore['id'][domain_id]['secret'])
-
-			yield response
+		yield response
 
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)

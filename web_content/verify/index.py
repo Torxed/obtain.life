@@ -1,4 +1,4 @@
-import json, dns.resolver
+import json, dns.resolver, urllib.request
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -116,13 +116,13 @@ HTML_TEMPLATE = """
 			You must create a master password for your domain admin account.<br>
 			<br>
 			<b>Important:</b> If you close this window/tab without setting a password,<br>
-			The claim will be void and discarded. <br>
+			the claim will be void and discarded. <br>
 			You have 10 minutes before this session is automatically discarded.
 		</span>
 	
 		<div class="inputs">
-			<label>anton@hvornum.se</label>
-			<input type="text" id="password" class="inputField" placeholder="Password for admin account">
+			<label>{admin}</label>
+			<input type="password" id="password" class="inputField" placeholder="Password for admin account">
 			<button id="submit" class="inputField">Set Password</button>
 		</div>
 	</div>
@@ -153,12 +153,19 @@ def response(root, path, payload, headers, *args, **kwargs):
 
 							otp = uid()
 							datastore['OTPs'][otp] = {'domain' : domain, 'admin' : datastore['claims'][domain][challenge]}
-							return {}, HTML_TEMPLATE.format(DOMAIN=domain, OTP=otp)
+							return {}, HTML_TEMPLATE.format(DOMAIN=domain, OTP=otp, admin=datastore['claims'][domain][challenge])
 						print(f'Challenge "{challenge}" for domain "{domain}" does not match any in {datastore["claims"][domain]}')
 				except dns.resolver.NXDOMAIN:
 					pass
 	elif mode == 'HTTPS':
-		pass
+		response = urllib.request.urlopen(f'https://{domain}/obtain.life.txt')
+		challenge = response.read().decode('UTF-8').strip(' \n\r.;')
+		if challenge in datastore['claims'][domain]:
+			otp = uid()
+			datastore['OTPs'][otp] = {'domain' : domain, 'admin' : datastore['claims'][domain][challenge]}
+			return {}, HTML_TEMPLATE.format(DOMAIN=domain, OTP=otp, admin=datastore['claims'][domain][challenge])
+
+		print(f'Challenge "{challenge}" for domain "{domain}" does not match any in {datastore["claims"][domain]}')
 
 	return {b'Content-Type' : b'application/json'}, bytes(json.dumps({
 		'status' : 'failed',

@@ -27,6 +27,10 @@
 				socket.subscribe('profile', (payload) => {
 					show_profile(payload);
 				})
+
+				socket.subscribe('domain', (payload) => {
+					show_domain_info(payload);
+				})
 			}
 		}
 		xhr.send();
@@ -34,26 +38,120 @@
 	<script type="text/javascript">
 		let secret = "c8ee4162d1df58aadd4f9e70df2744ed13ba1d37e8bf5946b87aedb71d5c07da";
 		let token = localStorage.getItem('obtain.life.token');
+		let life = null;
 
 		if(typeof token === 'undefined' || !token) {
+			alert('No token defined.');
 			window.location.href = '/';
+		}
+
+		function label(text) {
+			let obj = document.createElement('label');
+			obj.innerHTML = text;
+			return obj;
+		}
+
+		let elements = {}; // Used for popups
+		function popup(title_content, body_content, buttons_struct=null) {
+			let div = document.createElement('div');
+			div.id = 'popup_'+(Math.random() * 1001);
+			div.classList = 'popup';
+			let title = document.createElement('div');
+			title.classList = 'title';
+			if(typeof title_content === 'string')
+				title.innerHTML = title_content;
+			else
+				title.appendChild(title_content);
+			let body = document.createElement('div');
+			body.classList = 'body';
+			if(typeof body_content === 'string')
+				body.innerHTML = body_content;
+			else
+				body.appendChild(body_content);
+			
+			div.appendChild(title);
+			div.appendChild(body);
+			
+			if(buttons_struct) {
+				let buttons = document.createElement('div');
+				buttons.classList = 'buttons';
+				Object.keys(buttons_struct).forEach(function(label, index) {
+					let button = document.createElement('button');
+					button.innerHTML = label;
+					button.classList = label;
+					button.addEventListener('click', function(event) {
+						buttons_struct[label](div);
+					});
+					buttons.appendChild(button);
+				})
+				div.appendChild(buttons);
+			}
+			elements[title] = div;
+			document.getElementsByTagName("body")[0].appendChild(div);
+			return div;
+		}
+
+		function show_domain_info(payload) {
+			if(payload['status'] !== 'success') {
+				localStorage.removeItem('obtain.life.token');
+				alert('Failed to retrieve domain information.');
+				//window.location.href = '/';
+				return;
+			}
+
+			let domain = payload['domain'];
+			let secret = domain['secret'];
+			let service_secret = domain['service_secret'];
+
+			let domain_container = document.querySelector('#domain');
+			let domain_name = document.createElement('h3');
+			let domain_contact_label = label('Domain contact:');
+			let domain_contact = document.createElement('input');
+			let domain_secret_label = label('Domain secret:')
+			let domain_secret = document.createElement('input');
+			let domain_service_secret_label = label('Domain service secret:')
+			let domain_service_secret = document.createElement('input');
+			domain_contact.type = 'text';
+
+			domain_name.innerHTML = domain['name'];
+			domain_name.classList = 'capitalize';
+			domain_contact.value = domain['contact'];
+			domain_secret.value = secret;
+			domain_secret.disabled = true;
+			domain_secret.classList = 'min_470';
+			domain_service_secret.value = service_secret;
+			domain_service_secret.disabled = true;
+			domain_service_secret.classList = 'min_470';
+
+			domain_container.innerHTML = '';
+			domain_container.appendChild(domain_name);
+			domain_container.appendChild(domain_contact_label);
+			domain_container.appendChild(domain_contact);
+
+			domain_container.appendChild(domain_secret_label);
+			domain_container.appendChild(domain_secret);
+
+			domain_container.appendChild(domain_service_secret_label);
+			domain_container.appendChild(domain_service_secret);
 		}
 
 		function show_profile(payload) {
 			if(payload['status'] !== 'success') {
 				localStorage.removeItem('obtain.life.token');
+				alert('Failed to retrieve profile information.');
 				window.location.href = '/';
 				return;
 			}
 			
-			let main = document.querySelector('#main');
+			let profile_container = document.querySelector('#profile');
 			let profile = document.createElement('div');
 			let account_id = document.createElement('h3');
 			let account_data = document.createElement('div');
 			let save = document.createElement('button');
 
 			account_id.innerHTML = payload['account_id'];
-			save.innerHTML = 'Save & Update information';
+			account_id.classList = 'capitalize';
+			save.innerHTML = 'Update account information';
 
 			profile.classList = 'profile';
 			profile.appendChild(account_id);
@@ -64,7 +162,7 @@
 				let input = document.createElement('input');
 
 				if(key == 'password')
-					input.type = 'password';
+					return;
 				else
 					input.type = 'text';
 
@@ -80,23 +178,96 @@
 
 			profile.appendChild(account_data);
 			profile.appendChild(save);
-			main.innerHTML = '';
-			main.appendChild(profile);
+			profile_container.innerHTML = '';
+			profile_container.appendChild(profile);
 
 		}
 
 		window.onload = function() {
-			let life = new olife('obtain.life', 'HS256', secret);
+			life = new olife('obtain.life', 'HS256', secret);
 
 			let interval = setInterval(() => {
 				if(socket) {
 					clearInterval(interval);
 					life.get_profile(null, token, (payload) => {
-						console.log(payload);
 						socket.send(payload);
 					});
+
+					let domain_payload = {
+						"alg": "HS256",
+						"domain": "obtain.life",
+						"_module": "domain",
+						"token": token
+					};
+					life.sign(domain_payload, function(signature) {
+						domain_payload['sign'] = signature
+						socket.send(domain_payload);
+					})
 				}
 			}, 10);
+
+			document.querySelector('#logout').addEventListener('click', function() {
+				localStorage.removeItem('obtain.life.token');
+				window.location.href = '/';
+			})
+
+			document.querySelector('#passwd').addEventListener('click', function() {
+				let popup_body = document.createElement('div');
+				let popup_old_pwd = document.createElement('input');
+				let popup_new_pwd = document.createElement('input');
+				
+				popup_body.classList = 'card';
+				popup_old_pwd.type = 'password';
+				popup_new_pwd.type = 'password';
+				popup_old_pwd.id = 'old_pwd';
+				popup_new_pwd.id = 'new_pwd';
+				popup_old_pwd.placeholder = 'Old password';
+				popup_new_pwd.placeholder = 'New password';
+
+				let popup_header = document.createElement('div');
+				popup_header.classList = 'header';
+				popup_header.innerHTML = 'Old password';
+
+				let popup_header_new = document.createElement('div');
+				popup_header_new.classList = 'header';
+				popup_header_new.innerHTML = 'New password';
+
+				popup_body.appendChild(popup_header);
+				popup_body.appendChild(popup_old_pwd);
+				popup_body.appendChild(popup_header_new);
+				popup_body.appendChild(popup_new_pwd);
+
+				popup("Change Password Prompt", popup_body, {
+					"OK" : function(div) {
+						let new_password = {
+							"alg": life.mode,
+							"domain": life.domain,
+							"_module": "profile",
+							"old_pwd": popup_old_pwd.value,
+							"new_pwd": popup_new_pwd.value,
+							"token": token
+						};
+						life.sign(new_password, function(signature) {
+							new_password['sign'] = signature
+							socket.send(new_password);
+						})
+
+						socket.subscribe('profile', (response) => {
+							if(typeof response['status'] !== 'undefined' && response['status'] == 'success' && typeof response['change'] !== 'undefined' && response['change'] == 'new_pwd') {
+								token = response['token'];
+								localStorage.setItem('obtain.life.token', token);
+								div.remove();
+								// socket.unsubscribe('account_id_thingie');
+							} else {
+								let error_message = document.createElement('span');
+								error_message.classList = 'error';
+								error_message.innerHTML = response['message'];
+								popup_body.appendChild(error_message)
+							}
+						})
+					},
+				});
+			})
 		}
 	</script>
 	<style type="text/css">
@@ -149,16 +320,13 @@
 
 		.main {
 			display: flex;
-			flex-direction: column;
+			flex-direction: row;
 			justify-content: center;
-			align-items: center;
 		}
 
 			.profile {
 				display: flex;
 				flex-direction: column;
-				margin-right: auto;
-				margin-left: 10px;
 			}
 
 				.information {
@@ -166,13 +334,13 @@
 					flex-direction: column;
 				}
 
-				.profile input {
+				input {
 					border-radius: 5px;
 					padding: 4px;
 					border: 1px solid var(--dark);
 				}
 
-				.profile label {
+				label {
 					margin-top: 5px;
 				}
 
@@ -186,15 +354,132 @@
 					border-radius: 4px;
 					padding: 5px;
 				}
+
+		.block {
+			display: flex;
+			flex-direction: column;
+			margin: 10px;
+		}
+
+		.separator {
+			border-right: 2px solid var(--light-blue);
+			padding-right: 20px;
+		}
+
+		.min_470 {
+			min-width: 470px;
+		}
+
+		.logo {
+			height: 32px;
+		}
+
+		.menu > .buttons {
+			margin-left: auto;
+		}
+
+		.capitalize {
+			text-transform: capitalize;
+		}
+
+		.header {
+			margin-top: 10px;
+		}
+
+		.popup {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			background-color: #272822;
+			border: 1px solid #49483E;
+			display: flex;
+			min-height: 0;
+			flex-direction: column;
+			flex-grow: 1;
+			flex-shrink: 0;
+			flex-basis: 100%;
+		}
+			.popup > .title {
+				font-weight: bold;
+				font-size: 14px;
+				padding: 5px;
+				margin: 5px;
+				color: #66D9EF;
+				flex: 1;
+			}
+
+			.popup > .body {
+				padding: 5px;
+				margin: 5px;
+				color: #F8F8F2;
+				flex: 1;
+
+				display: flex;
+				flex-direction: column;
+			}
+
+				.popup > .body > * {
+					flex: 1;
+					display: flex;
+					flex-direction: column;
+				}
+
+			.popup > .buttons {
+				display: flex;
+				flex-direction: row;
+				border-top: 1px solid var(--blue);
+				padding: 4px;
+			}
+				.popup > .buttons > .Save {
+					flex: 1;
+					color: var(--power-on);
+					border-right: 1px solid var(--blue);
+				}
+					.popup > .buttons > .Save:hover {
+						font-weight: bold;
+					}
+
+				.popup > .buttons > .OK {
+					flex: 1;
+					color: var(--power-on);
+					border-right: 1px solid var(--blue);
+				}
+					.popup > .buttons > .OK:hover {
+						font-weight: bold;
+					}
+
+				.popup > .buttons > .Discard {
+					flex: 1;
+					color: var(--power-off);
+				}
+					.popup > .buttons > .Discard:hover {
+						font-weight: bold;
+					}
+				.popup > .buttons > .Cancel {
+					flex: 1;
+					color: var(--power-off);
+				}
+					.popup > .buttons > .Cancel:hover {
+						font-weight: bold;
+					}
 	</style>
 </head>
 <body>
 	<div class="container">
 		<div class="menu grower">
-			Menu
+			<img class="logo" src="/resources/img/obtain_life_logo.png">
+			<div class="buttons">
+				<button id="passwd">Change Password</button>
+				<button id="logout">Logout</button>
+			</div>
 		</div>
 		<div class="main" id="main">
+			<div class="block separator" id="profile">
 
+			</div>
+			<div class="block" id="domain">
+
+			</div>
 		</div>
 	</div>
 </body>

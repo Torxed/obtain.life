@@ -55,7 +55,6 @@
 					}
 
 				.buttons {
-					width: 100%;
 					display: flex;
 					flex-direction: row;
 				}
@@ -73,6 +72,87 @@
 					p:hover {
 						text-decoration: underline;
 					}
+
+		.popup {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			background-color: rgba(120, 120, 120, 0.85);
+			border: 1px solid #49483E;
+			display: flex;
+			min-height: 0;
+			flex-direction: column;
+			flex-grow: 1;
+			flex-shrink: 0;
+			flex-basis: 100%;
+			border-radius: 5px;
+		}
+			.popup > .title {
+				font-weight: bold;
+				font-size: 14px;
+				padding: 10px;
+				color: #66D9EF;
+				flex: 1;
+				background-color: #282828;
+				border-bottom: 1px solid #222222;
+			}
+
+			.popup > .body {
+				color: #F8F8F2;
+				flex: 1;
+				display: flex;
+				flex-direction: column;
+			}
+
+				.popup > .body > * {
+					flex: 1;
+					display: flex;
+					flex-direction: column;
+				}
+
+			.popup > .buttons {
+				display: flex;
+				flex-direction: row;
+				border-top: 1px solid var(--blue);
+				padding: 4px;
+			}
+				.popup > .buttons > .Save {
+					flex: 1;
+					color: var(--power-on);
+					border-right: 1px solid var(--blue);
+				}
+					.popup > .buttons > .Save:hover {
+						font-weight: bold;
+					}
+
+				.popup > .buttons > .OK {
+					flex: 1;
+					border: 1px solid #272727;
+					border-radius: 4px;
+					padding: 5px;
+				}
+					.popup > .buttons > .OK:hover {
+						font-weight: bold;
+					}
+
+				.popup > .buttons > .Discard {
+					flex: 1;
+					color: var(--power-off);
+				}
+					.popup > .buttons > .Discard:hover {
+						font-weight: bold;
+					}
+				.popup > .buttons > .Cancel {
+					flex: 1;
+					color: var(--power-off);
+				}
+					.popup > .buttons > .Cancel:hover {
+						font-weight: bold;
+					}
+
+			.inputs {
+				padding: 20px;
+			}
 		</style>
 		<script type="text/javascript">
 			let socket = null; // Create a global socket element, initate it with `new slimWebSocket();` later
@@ -95,8 +175,67 @@
 
 					socket = new slimWebSocket();
 					socket.subscribe('auth', (data) => {
-						localStorage.setItem('obtain.life.token', data['token']);
-						window.location.href = '/portal/';
+						//localStorage.setItem('obtain.life.token', data['token']);
+						//window.location.href = '/portal/';
+
+						if(data['status'] == 'success' && typeof data['2FA'] !== 'undefined') {
+							//if(typeof data['challenge'] !== 'undefined' && typeof data['challenge_page'] !== 'undefined') {
+							//	localStorage.setItem('obtain.life.claim_challenge', data['challenge']);
+							//	window.location.href = data['challenge_page']+'?domain='+data['domain'];
+							//}
+
+							let popup_body = document.createElement('div');
+							let two_factor_code = document.createElement('input');
+							let inputs = document.createElement('div');
+							
+							inputs.classList = 'inputs';
+							popup_body.classList = 'card';
+							two_factor_code.type = 'text';
+							two_factor_code.id = 'two_factor_code';
+							two_factor_code.placeholder = 'Two factor code';
+							two_factor_code.classList = 'inputField';
+
+							let popup_header = document.createElement('div');
+							popup_header.classList = 'header';
+							popup_header.innerHTML = '<i>(code has been sent to your e-mail)</i>';
+
+							popup_body.appendChild(popup_header);
+							inputs.appendChild(two_factor_code);
+							popup_body.appendChild(inputs);
+
+							let obj = popup("Two factor authentication", popup_body, {
+								"OK" : function(div) {
+									let two_factor_payload = {
+										"alg": life.mode,
+										"domain": life.domain,
+										"_module": "2FA",
+										"2FA": data['2FA'],
+										"code": parseInt(two_factor_code.value)
+									};
+									life.sign(two_factor_payload, function(signature) {
+										two_factor_payload['sign'] = signature
+										socket.send(two_factor_payload);
+									})
+								}
+							});
+
+							two_factor_code.focus();
+							obj.style.marginLeft = '-'+(obj.scrollWidth/2)+'px';
+							obj.style.marginTop = '-'+(obj.scrollHeight/2)+'px';
+							console.log();
+						} else if (data['status'] == 'success' && typeof data['token'] !== 'undefined') {
+							localStorage.setItem('obtain.life.token', data['token']);
+							window.location.href = '/portal/';
+						} 
+					})
+
+					socket.subscribe('claim', (data) => {
+						if(data['status'] == 'success') {
+							if(typeof data['challenge'] !== 'undefined' && typeof data['challenge_page'] !== 'undefined') {
+								localStorage.setItem('obtain.life.claim_challenge', data['challenge']);
+								window.location.href = data['challenge_page']+'?domain='+data['domain'];
+							}
+						}
 					})
 				}
 			}
@@ -106,13 +245,52 @@
 		<script type="text/javascript">
 			let secret = "c8ee4162d1df58aadd4f9e70df2744ed13ba1d37e8bf5946b87aedb71d5c07da";
 			let token = localStorage.getItem('obtain.life.token');
+			let life = new olife('obtain.life', 'HS256', secret);
+
+			let elements = {}; // Used for popups
+			function popup(title_content, body_content, buttons_struct=null) {
+				let div = document.createElement('div');
+				div.id = 'popup_'+(Math.random() * 1001);
+				div.classList = 'popup';
+				let title = document.createElement('div');
+				title.classList = 'title';
+				if(typeof title_content === 'string')
+					title.innerHTML = title_content;
+				else
+					title.appendChild(title_content);
+				let body = document.createElement('div');
+				body.classList = 'body';
+				if(typeof body_content === 'string')
+					body.innerHTML = body_content;
+				else
+					body.appendChild(body_content);
+				
+				div.appendChild(title);
+				div.appendChild(body);
+				
+				if(buttons_struct) {
+					let buttons = document.createElement('div');
+					buttons.classList = 'buttons';
+					Object.keys(buttons_struct).forEach(function(label, index) {
+						let button = document.createElement('button');
+						button.innerHTML = label;
+						button.classList = label;
+						button.addEventListener('click', function(event) {
+							buttons_struct[label](div);
+						});
+						buttons.appendChild(button);
+					})
+					div.appendChild(buttons);
+				}
+				elements[title] = div;
+				document.getElementsByTagName("body")[0].appendChild(div);
+				return div;
+			}
 
 			window.onload = function() {
 				if(typeof token !== 'undefined' && token) {
 					window.location.href = '/portal/';
 				} else {
-					let life = new olife('obtain.life', 'HS256', secret);
-					
 					document.querySelector('#login').addEventListener('click', function() {
 						let username = document.querySelector('#username').value;
 						let password = document.querySelector('#password').value;

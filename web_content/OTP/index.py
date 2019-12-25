@@ -1,58 +1,6 @@
-import json
+import json, os, hashlib
 from time import time
-
-"""
-<h3>Accounts:</h3>
-<span>
-	You can add, manage and update user accounts at <a href="https://obtain.life">obtain.life</a>.<br>
-	Simply log in with this admin account to do so<br>
-	<i>(or promote others to administrators and let them do it)</i>
-</span>
-<h3>Domain configuration:</h3>
-<span>
-	You can also tweak configurations for your domain.<br>
-	For instance,<br>
-	<ul>
-		<li>Set password expire times</li>
-		<li>Account expire dates</li>
-	</ul>
-	Best of luck //Obtain.life
-</span>
-"""
-
-TEXT_TEMPLATE = """
-You have successfully claimed {DOMAIN}.
-
-You can add, manage and update user accounts at <a href="https://obtain.life">obtain.life</a>.
-Simply log in with this admin account, or promote others to administrators and let them do it.
-
-You can also tweak configurations for your domain, such as password expirey, account expire dates etc.
-
-Best of luck //Obtain.life
-"""
-
-HTML_TEMPLATE = """
-<html>
-	<head>
-		<title>You have successfully claimed {DOMAIN}</title>
-	</head>
-	<body>
-		<div>
-			<h3>Accounts:</h3>
-			<span>
-				You can add, manage and update user accounts at <a href="https://obtain.life">obtain.life</a>.
-				Simply log in with this admin account, or promote others to administrators and let them do it.
-			</span>
-			<h3>Domain configuration:</h3>
-			<span>
-				You can also tweak configurations for your domain, such as password expirey, account expire dates etc.
-
-				Best of luck //Obtain.life
-			</span>
-		</div>
-	</body>
-</html>
-"""
+from base64 import b64encode, b64decode
 
 def response(root, path, payload, headers, *args, **kwargs):
 	if type(payload) != bytes: return None
@@ -73,6 +21,8 @@ def response(root, path, payload, headers, *args, **kwargs):
 	domain = OTP_INFO['domain']
 	admin = OTP_INFO['admin']
 	admin_user = admin.split('@', 1)[0]
+	salt = os.urandom(8)
+	password = b64encode(salt).decode('UTF-8')+'&'+hashlib.sha512(salt+bytes(data['password'], 'UTF-8')).hexdigest()
 
 	domain_id = uid()
 	datastore['domains'][domain] = domain_id
@@ -80,12 +30,17 @@ def response(root, path, payload, headers, *args, **kwargs):
 		"name" : domain,
 		"contact" : admin,
 		"alg" : "HS256",
-		"secret" : uid(),
-		"service_secret" : uid(),
+		"secret" : short_uid(),
+		"service_secret" : short_uid(),
 		"users" : {
 			admin_user : {"username" : admin_user,
-						"password" : data['password'],
-						"friendly_name" : admin_user}
+						"password" : password,
+						"email" : admin,
+						#"domain" : domain,
+						#"friendly_name" : admin_user,
+						"roles" : [
+							"obtain.life.admin"
+						]}
 		},
 		"auth_sessions" : {
 
@@ -95,13 +50,18 @@ def response(root, path, payload, headers, *args, **kwargs):
 		}
 	}
 
-	datastore['id'][datastore['domains']['obtain.life']]['users'][admin] = {
-		"username" : admin_user,
-		"password" : data['password'],
-		"friendly_name" : admin_user}
+	if not admin in datastore['id'][datastore['domains']['obtain.life']]['users']:
+		datastore['id'][datastore['domains']['obtain.life']]['users'][admin] = {
+			"username" : admin,
+			"password" : password,
+			"email" : admin, # Shadow copy this...
+			"friendly_name" : admin_user,
+			"roles" : ["domain.admin"],
+			"obtain.life.username.map" : admin_user,
+			"domain" : domain}
 
 	token = uid()
-	datastore['tokens'][token] = {'user' : admin_user, 'time' : time(), 'domain' : domain}
+	datastore['tokens'][token] = {'user' : admin_user, 'time' : time(), 'domain' : domain, 'shadow_username' : admin, 'shadow_domain' : 'obtain.life'}
 
 	return {b'Content-Type' : b'application/json'}, bytes(json.dumps({
 		'status' : 'success',

@@ -12,15 +12,29 @@ class _olife {
 		this.domain = domain;
 		this.mode = mode;
 		this.key = secret;
+		this.token = localStorage.getItem('obtain.life.token');
 	}
 
-	sign(data, key, func) {
-		let payload = getUtf8Bytes(JSON.stringify(data));
+	sign(data, key, func=null) {
+		// If no key is given, assume that key contains the func
+		// and we do key -> func, and insert this.key into key.
+		if(typeof key !== 'string') {
+			func = key
+			key = this.key;
+		}
+		const unsigned_payload = Object.assign({}, data);
+		console.log('Signing payload:', unsigned_payload);
+		console.log('With key:', key)
+		let payload = getUtf8Bytes(JSON.stringify(unsigned_payload));
 		crypto.subtle.importKey('raw', getUtf8Bytes(key), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']).then(function(cryptoKey) {
 			crypto.subtle.sign('HMAC', cryptoKey, payload).then(function(signature) {
 				func(hexdigest(signature));
 			})
 		})
+	}
+
+	set_token(token) {
+		this.token = token;
 	}
 
 	subscribe(domain, secret, func=null) {
@@ -69,7 +83,6 @@ class _olife {
 			"admin": email
 		}
 
-		console.log('Signing with key:', this.key);
 		this.sign(payload, this.key, (signature) => {
 			payload['sign'] = signature;
 			if(func)
