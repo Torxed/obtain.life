@@ -34,16 +34,17 @@ First, your or your orgnization needs to create a master account for your domain
 This is so that someone can setup the auth-flow (callbacks etc).
 
 This is done by going to https://obtain.life and "claim" your domain.<br>
-The [claim](https://github.com/Torxed/obtain.life/wiki) works by checking against a DNS record *(TXT `_obtain.life.[claimed domain]`)* or via HTTPS file lookup on [https://[claimed.domain]/obtain.life](https://[claimed.domain]/obtain.life). Once the claim is verified, the claim-ee will recieve a e-mail with a reset-password link to complete the master account for the domain. If multiple domains are claimed, only one password-email will go out and the same account can be used to manage multiple domains.
+The [claim](https://github.com/Torxed/obtain.life/wiki) works by checking against a DNS TXT record *(TXT record must be called `_obtain.life.[claimed domain]`)* or via HTTPS file lookup on [https://[claimed.domain]/obtain.life.txt](https://[claimed.domain]/obtain.life.txt). Once the claim is verified, the claim-ee will be prompted to enter a password for the new administrative account. If no password was given at the time, a reminder e-mail will be sent out and the administrator has 24h to complete the registration before the domain claim becomes void and discarded.
 
-Once the domain is claimed, simply connect via sockets, websockets or HTTPS and login against your domain.<br>
-`obtrain.life` will contact any backend's registered via the `register` API and let your environment know when tokens are distributed upon successful logins.
+One administrative account can claim multiple domains and manage them individually.
 
-All credentials and supplied user-information is stored in the `obtain.life` database according to current industry standards.<br>
-But to ensure `obtain.life` can't access resources on your infrastructure *(by impersonating your user)*,<br>
-add one additional token/shared secret to your own payloads, only known by your clients and your infrastructure. This ensures that `obtain.life` personell can never hijack a session without heavily brute forcing the services *(not that we'll ever do this, but we'd like to help secure your services)*
+Once the domain is claimed, back-end services can `subscribe` to events and users can login via sockets, websockets or HTTPS against the claimed domain. For more on the `subscribe` API, visit the documentation/wiki.
 
-`obtain.life` simply provides a good compliant way to store credentials, and SSO possebility.
+All credentials and supplied user-information is stored in the `obtain.life` database according to current industry standards *(Currently that means salted with a strong hash and protected by 2FA)*.<br>
+But to ensure `obtain.life` can't access resources on your domains infrastructure *(by impersonating your users)*,<br>
+add additional tokens/shared secrets to your own payloads when talking with your domain infrastructure. This ensures that `obtain.life` developers and maintainers can't hijack a session without heavily brute forcing the service tokens on your end *(not that we'll ever do this, but we'd like to help our users follow best practices)*
+
+`obtain.life` simply provides a good compliant way to store credentials, and SSO possebility across domain resources.<br>
 
 ## Cross-domain support?
 
