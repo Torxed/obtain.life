@@ -623,7 +623,7 @@ Best wishes //Obtain.life
 websocket = spiderWeb.upgrader({'default': parser()})
 http = slimhttpd.http_serve(upgrades={b'websocket': websocket}, port=1337)
 https = slimhttpd.https_serve(upgrades={b'websocket': websocket}, port=1338, cert='cert.pem', key='key.pem')
-socket = slimSocket.socket_serve(port=1339, parsers=websocket.parsers, cert='ca.crt', key='ca.key')
+socket = slimSocket.socket_serve(port=1339, parsers=websocket.parsers, cert='2019-12-15.pem', key='2019-12-15.key')
 
 while 1:
 	for handler in [http, https, socket]:
