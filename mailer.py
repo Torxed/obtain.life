@@ -114,6 +114,8 @@ def email(configuration):
 			if server.starttls(context=context)[0] != 220:
 				log('Could not start TLS.', level=3, origin='mailer')
 			
+			log('2FA mail from {SSH_MAIL_USER_FROM}@{SSH_MAIL_USER_FROMDOMAIN} -> {SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN}'.format(**configuration), origin='mailer', level=4)
+
 			server.sendmail('{SSH_MAIL_USER_FROM}@{SSH_MAIL_USER_FROMDOMAIN}'.format(**configuration), '{SSH_MAIL_USER_TO}@{SSH_MAIL_USER_TODOMAIN}'.format(**configuration), email.as_string())
 			server.quit()
 		#		server.close()
